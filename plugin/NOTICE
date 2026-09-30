@@ -1,0 +1,23 @@
+autoresearch for Claude Code
+Copyright (c) 2026 bn-l. MIT License.
+
+This software ports, and in large part copies, third-party code:
+
+pi-autoresearch v1.8.1 (https://github.com/davebcn87/pi-autoresearch, commit 939ede8)
+  Copyright (c) 2026 Tobi Lutke, David Cortés. MIT License.
+  Ported into plugin/hooks/upstream/ (each file says which lines), plugin/skills/
+  (with the edits in patches/), plugin/assets/template.html and plugin/assets/logo.webp,
+  and plugin/server/dashboard-server.mjs. The full repository is vendored under upstream/.
+  pi-autoresearch is a community extension for pi; references to pi identify
+  compatibility and do not transfer ownership of the pi name or project.
+
+pi (https://github.com/earendil-works/pi, commit 1b347794e2a630e4359f2584f4eea388145d0ddf)
+  Copyright (c) 2025 Mario Zechner. MIT License.
+  plugin/hooks/upstream/vendor/tui-width.ts and truncate.ts.
+
+get-east-asian-width 1.6.0 (https://github.com/sindresorhus/get-east-asian-width)
+  Copyright (c) Sindre Sorhus. MIT License (plugin/hooks/upstream/vendor/get-east-asian-width/LICENSE).
+
+Node.js v22.20.0 lib/path.js, the POSIX half (https://github.com/nodejs/node)
+  Copyright Joyent, Inc. and other Node contributors. MIT License (notice kept in
+  plugin/hooks/upstream/vendor/path.js).
