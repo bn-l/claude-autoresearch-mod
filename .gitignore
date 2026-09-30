@@ -34,3 +34,4 @@ pnpm-debug.log*
 # plugin dev
 plugin/.claude-plugin/types/
 upstream/.gen-schemas-*/
+research-files/
