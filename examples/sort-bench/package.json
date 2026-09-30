@@ -1,0 +1,6 @@
+{
+  "name": "sort-bench",
+  "private": true,
+  "type": "module",
+  "description": "A tiny, noisy benchmark for trying the autoresearch mod"
+}
