@@ -23,6 +23,7 @@ import { isAutoresearchRunEntry, parseJsonlEntry, reconstructJsonlState } from "
 import { TOOL_SCHEMAS } from "../upstream/schemas.ts";
 import { TOOLS } from "../upstream/experiment-core.ts";
 import type { LoopState } from "./host.ts";
+import { uncommittedChanges, uncommittedNotice } from "./clean-tree.ts";
 import {
   canonicalPath,
   publish,
@@ -184,15 +185,21 @@ export const reconstructState = async (ctx: Ctx): Promise<void> => {
   // A recorded `/autoresearch on|off` in this session wins; otherwise same-cwd
   // sessions default on and redirected workingDir sessions default off, so
   // unrelated chats launched from a shared cwd never activate it.
-  await setAutoresearchMode(
-    ctx,
-    shouldAutoActivateAutoresearch(
-      await canonicalPath(ctx.host, cwd),
-      await canonicalPath(ctx.host, workDir),
-      hasPersistedLog,
-      await recordedActivationDecision(ctx, workDir),
-    ),
+  let activate = shouldAutoActivateAutoresearch(
+    await canonicalPath(ctx.host, cwd),
+    await canonicalPath(ctx.host, workDir),
+    hasPersistedLog,
+    await recordedActivationDecision(ctx, workDir),
   );
+  // Not in upstream (I10): a discard's revert would erase work left uncommitted.
+  if (activate) {
+    const uncommitted = await uncommittedChanges(ctx.host, workDir);
+    if (uncommitted?.length) {
+      ctx.host.notify(uncommittedNotice(uncommitted, "session"), "warning");
+      activate = false;
+    }
+  }
+  await setAutoresearchMode(ctx, activate);
 
   updateWidget(ctx);
 };

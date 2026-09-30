@@ -211,6 +211,12 @@ credentials out of scope, work in a dedicated branch or worktree with a clean tr
 use a sandbox for untrusted projects. Commits made by `log_experiment` skip the
 repository's git hooks.
 
+Every discarded experiment is reverted with `git checkout -- .` and `git clean -fd`, as in
+pi, which would also erase work you hadn't committed. So the loop doesn't start while
+`git status` shows changes outside `.auto/` (ignored files don't count): `/autoresearch`
+names the files and asks you to commit or stash them (`git stash -u`), or to use a clean
+worktree. pi has no such check.
+
 ## Controlling costs
 
 Loops run until stopped. Cap them with `maxIterations`, with your plan's or API key's
