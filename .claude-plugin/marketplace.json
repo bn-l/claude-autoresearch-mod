@@ -1,0 +1,17 @@
+{
+  "name": "autoresearch",
+  "owner": { "name": "bn-l" },
+  "metadata": {
+    "description": "Autonomous experiment loops for Claude Code, ported from pi-autoresearch."
+  },
+  "plugins": [
+    {
+      "name": "autoresearch",
+      "source": "./plugin",
+      "description": "Autonomous experiment loop for Claude Code: run, measure, keep or discard. A port of pi-autoresearch.",
+      "version": "0.1.0",
+      "license": "MIT",
+      "keywords": ["autoresearch", "experiment", "optimization", "benchmark", "mod"]
+    }
+  ]
+}
