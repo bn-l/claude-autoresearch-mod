@@ -42,7 +42,7 @@ The browser dashboard also needs `node` (18 or newer) or `bun` on `PATH`.
 
   ```bash
   claude plugin marketplace add /path/to/this/repo      # or its GitHub owner/repo
-  claude plugin install autoresearch@autoresearch
+  claude plugin install autoresearch@bn-l
   ```
 
 ## What's included
@@ -155,12 +155,7 @@ default), the mod compacts the conversation before the next iteration. The summa
 built from the session files (upstream's compaction summary: prompt, ideas, the last 50
 runs), so it takes milliseconds and no model call, and the current iteration is kept
 whole. A manual `/compact` gets the same treatment, and the model is told to finish an
-in-flight iteration first. Set the option with `claude plugin configure autoresearch`, or
-in settings:
-
-```json
-{ "pluginConfigs": { "autoresearch": { "options": { "compactAtPercent": 60 } } } }
-```
+in-flight iteration first. `compactAtPercent` is a plugin option (see [Configuration](#configuration)).
 
 ## Configuration
 
@@ -175,7 +170,16 @@ in settings:
 | `workingDir` | Directory for all autoresearch operations: files, commands and git. Absolute, or relative to the session's working directory. Must exist. Sessions in a redirected directory only turn on by themselves if this Claude Code session turned them on. |
 | `maxIterations` | Experiments before stopping. The mode turns off and the turn ends. |
 
-Plugin options (`claude plugin configure autoresearch`):
+Plugin options. For an installed copy, set them with `claude plugin configure autoresearch@bn-l`
+(or `/plugin configure autoresearch@bn-l` inside Claude Code), or in settings under the
+plugin's full ID:
+
+```json
+{ "pluginConfigs": { "autoresearch@bn-l": { "options": { "compactAtPercent": 60 } } } }
+```
+
+For a `--plugin-dir` session the key is `autoresearch`, for example
+`--settings '{"pluginConfigs":{"autoresearch":{"options":{"questionWaitMinutes":1}}}}'`.
 
 | Option | Default | Description |
 | --- | --- | --- |

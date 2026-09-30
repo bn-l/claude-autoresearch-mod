@@ -1,5 +1,5 @@
 {
-  "name": "autoresearch",
+  "name": "bn-l",
   "owner": { "name": "bn-l" },
   "metadata": {
     "description": "Autonomous experiment loops for Claude Code, ported from pi-autoresearch."
