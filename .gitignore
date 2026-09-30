@@ -30,3 +30,7 @@ pnpm-debug.log*
 .pnpm-store/
 .yarn/cache
 .yarn/install-state.gz
+
+# plugin dev
+plugin/.claude-plugin/types/
+upstream/.gen-schemas-*/
