@@ -143,6 +143,13 @@ iteration now" 800 ms later. It stops after 200 resumes, after more than 20 disc
 crashes in a row, at `maxIterations`, or on `/autoresearch off`. **Esc pauses the loop**:
 nothing is resumed until you send a message that leads to a logged experiment ("continue").
 
+**Questions.** When a turn ends by asking you something, the loop waits
+`questionWaitMinutes` (5 by default) for your reply, and the band says until when. Reply and
+the model gets your answer first; stay away and the loop carries on, telling the model that
+nobody replied so it makes the call itself. Telling a question apart is a guess from the
+turn's last lines (a question mark, or words like "your call" or "should I"), so now and
+then it waits when it needn't, or not at all. `0` carries on at once, as upstream does.
+
 **Context.** Between iterations, once the context window is `compactAtPercent` full (70 by
 default), the mod compacts the conversation before the next iteration. The summary is
 built from the session files (upstream's compaction summary: prompt, ideas, the last 50
@@ -174,6 +181,7 @@ Plugin options (`claude plugin configure autoresearch`):
 | --- | --- | --- |
 | `autoApproveTools` | `true` | Run the three tools without a permission prompt while the mode is on. |
 | `compactAtPercent` | `70` | Compact between iterations at this context fill; `0` turns it off. |
+| `questionWaitMinutes` | `5` | When a turn asks you something, wait this long for your reply before the loop carries on; `0` doesn't wait. |
 
 ## Backpressure checks
 
