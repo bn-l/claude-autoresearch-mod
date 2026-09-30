@@ -14,6 +14,7 @@ import {
 } from "../upstream/experiment-core.ts";
 import type { HookStage } from "../upstream/hooks-core.ts";
 import type { Cancel, Host, LoopState, QuestionWait, View } from "./host.ts";
+import type { TreeSnapshot } from "./snapshot.ts";
 
 export interface Options {
   /** userConfig `autoApproveTools`: allow our tools without a prompt while the mode is on. */
@@ -72,6 +73,11 @@ export interface Ctx {
    * until when, and how long the wait was. Cleared when a turn or a prompt comes first.
    */
   questionWait: QuestionWait | null;
+  /**
+   * The working tree as the current iteration started (I10): what log_experiment commits
+   * or reverts is what changed since. Null outside a git repository.
+   */
+  snapshot: TreeSnapshot | null;
 }
 
 export function createSessionRuntime(): AutoresearchRuntime {
@@ -100,6 +106,7 @@ export function createCtx(host: Host, options: Options): Ctx {
     compactedSinceTurn: false,
     lastBeforeSteer: null,
     questionWait: null,
+    snapshot: null,
   };
 }
 

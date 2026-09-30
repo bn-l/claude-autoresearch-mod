@@ -193,40 +193,24 @@ describe("/autoresearch", () => {
   });
 });
 
-// A discard reverts with `git checkout -- .` and `git clean -fd`, which would erase work
-// that was uncommitted before the loop started (I10).
+// Uncommitted work doesn't stop anything: keep and discard touch only what an experiment
+// changed (I10, covered in loop.test.ts).
 describe("uncommitted work (I10)", () => {
-  const settle = () => new Promise((resolve) => setTimeout(resolve, 100));
-  const warning = (session: Session) => session.host.notices.find((notice) => notice.level === "warning")?.text ?? "";
-
-  test("/autoresearch refuses to start over uncommitted changes, and says why", async () => {
+  test("/autoresearch starts over uncommitted changes", async () => {
     const cwd = await makeRepo({ "src.js": "one\n" }, { "src.js": "two\n", "notes.md": "wip\n" });
-    dirs.push(cwd);
-    const session = await open(cwd).start();
-    await session.command("optimize runtime");
-    await settle();
-
-    assert.equal(session.app.isModeOn(), false);
-    assert.deepEqual(session.host.submitted, []);
-    assert.deepEqual([...session.host.store.keys()].filter((key) => key.startsWith("activation:")), []);
-    assert.match(warning(session), /^Autoresearch not started: 2 uncommitted changes would be erased\.$/m);
-    assert.match(warning(session), /\(src\.js, notes\.md\)/);
-    assert.match(warning(session), /git stash -u/);
-  });
-
-  test("session files, ignored files and a clean tree don't stop it", async () => {
-    const cwd = await makeRepo({ ".gitignore": "out/\n" }, {
-      ".auto/prompt.md": "# goal\n",
-      "autoresearch.ideas.md": "- idea\n",
-      "out/build.log": "ignored\n",
-    });
     dirs.push(cwd);
     const session = await open(cwd).start();
     await session.command("optimize runtime");
 
     assert.equal(session.app.isModeOn(), true);
     await session.host.waitFor(() => session.host.submitted.length === 1, 2000, "the kickoff");
-    assert.equal(warning(session), "");
+  });
+
+  test("a same-cwd log turns the mode on over uncommitted changes", async () => {
+    const cwd = await sameCwd();
+    await writeFiles(cwd, { "notes.md": "wip\n" });
+    const session = await open(cwd).start();
+    assert.equal(session.app.isModeOn(), true);
   });
 
   test("outside a git repository it starts as before", async () => {
@@ -237,17 +221,6 @@ describe("uncommitted work (I10)", () => {
 
     assert.equal(session.app.isModeOn(), true);
     await session.host.waitFor(() => session.host.submitted.length === 1, 2000, "the kickoff");
-  });
-
-  test("a same-cwd log doesn't turn the mode on over uncommitted changes", async () => {
-    const cwd = await sameCwd();
-    await writeFiles(cwd, { "notes.md": "wip\n" });
-    const session = await open(cwd).start();
-
-    assert.equal(session.app.isModeOn(), false);
-    assert.equal(session.host.view.experiment?.results.length, 1);
-    assert.match(warning(session), /^Autoresearch left off: 1 uncommitted change would be erased\.$/m);
-    assert.match(warning(session), /run \/autoresearch to resume/);
   });
 });
 

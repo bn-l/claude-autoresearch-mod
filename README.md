@@ -211,11 +211,14 @@ credentials out of scope, work in a dedicated branch or worktree with a clean tr
 use a sandbox for untrusted projects. Commits made by `log_experiment` skip the
 repository's git hooks.
 
-Every discarded experiment is reverted with `git checkout -- .` and `git clean -fd`, as in
-pi, which would also erase work you hadn't committed. So the loop doesn't start while
-`git status` shows changes outside `.auto/` (ignored files don't count): `/autoresearch`
-names the files and asks you to commit or stash them (`git stash -u`), or to use a clean
-worktree. pi has no such check.
+Your uncommitted work is safe from the loop. pi's keep runs `git add -A && git commit` and
+its discard `git checkout -- .` and `git clean -fd`, which would commit your uncommitted
+edits into an experiment's commit, or erase them. Here each iteration starts from a
+snapshot of the working tree: a keep commits only what the experiment changed, and a
+discard undoes only that. If an experiment edits the same lines as your own uncommitted
+edits, the keep commits that file whole and says so. The one blind spot is an untracked
+file that was already there before an experiment changed it: that change is neither
+undone nor committed.
 
 ## Controlling costs
 

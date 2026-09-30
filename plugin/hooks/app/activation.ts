@@ -23,7 +23,7 @@ import { isAutoresearchRunEntry, parseJsonlEntry, reconstructJsonlState } from "
 import { TOOL_SCHEMAS } from "../upstream/schemas.ts";
 import { TOOLS } from "../upstream/experiment-core.ts";
 import type { LoopState } from "./host.ts";
-import { uncommittedChanges, uncommittedNotice } from "./clean-tree.ts";
+import { reloadSnapshot, snapshotWorkTree } from "./snapshot.ts";
 import {
   canonicalPath,
   publish,
@@ -185,20 +185,15 @@ export const reconstructState = async (ctx: Ctx): Promise<void> => {
   // A recorded `/autoresearch on|off` in this session wins; otherwise same-cwd
   // sessions default on and redirected workingDir sessions default off, so
   // unrelated chats launched from a shared cwd never activate it.
-  let activate = shouldAutoActivateAutoresearch(
+  const activate = shouldAutoActivateAutoresearch(
     await canonicalPath(ctx.host, cwd),
     await canonicalPath(ctx.host, workDir),
     hasPersistedLog,
     await recordedActivationDecision(ctx, workDir),
   );
-  // Not in upstream (I10): a discard's revert would erase work left uncommitted.
-  if (activate) {
-    const uncommitted = await uncommittedChanges(ctx.host, workDir);
-    if (uncommitted?.length) {
-      ctx.host.notify(uncommittedNotice(uncommitted, "session"), "warning");
-      activate = false;
-    }
-  }
+  // Not in upstream (I10): the next iteration starts from the tree as it is now.
+  ctx.snapshot = null;
+  if (activate) await snapshotWorkTree(ctx, workDir);
   await setAutoresearchMode(ctx, activate);
 
   updateWidget(ctx);
@@ -232,6 +227,8 @@ export async function restoreAfterReload(ctx: Ctx, loop: LoopState): Promise<voi
     await registerTools(ctx).catch(() => undefined);
   }
   await setAutoresearchMode(ctx, loop.mode);
+  // I10: the iteration's snapshot, as this session last took it; without one, a new one.
+  if (loop.mode) ctx.snapshot = (await reloadSnapshot(ctx, workDir)) ?? (await snapshotWorkTree(ctx, workDir));
   if (runtime.pendingResumeMessage !== null && !ctx.turn.busy) reschedulePendingResume(ctx, loop.questionWait ?? null);
   updateWidget(ctx);
 }

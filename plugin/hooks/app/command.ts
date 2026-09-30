@@ -29,7 +29,7 @@ import {
   updateWidget,
 } from "./activation.ts";
 import { cancelPendingResume } from "./resume.ts";
-import { uncommittedChanges, uncommittedNotice } from "./clean-tree.ts";
+import { snapshotWorkTree } from "./snapshot.ts";
 import { exportDashboard, stopDashboardServer } from "./export.ts";
 import { fireHook } from "./iteration-hooks.ts";
 
@@ -169,12 +169,8 @@ export async function runAutoresearchCommand(ctx: Ctx, args: string): Promise<Co
   }
 
   const workDir = await resolveWorkDir(host, await host.sessionCwd());
-  // Not in upstream (I10): a discard's revert would erase work left uncommitted.
-  const uncommitted = await uncommittedChanges(host, workDir);
-  if (uncommitted?.length) {
-    host.notify(uncommittedNotice(uncommitted, "command"), "warning");
-    return {};
-  }
+  // Not in upstream (I10): the first iteration starts from the tree as it is now.
+  await snapshotWorkTree(ctx, workDir);
   await recordAutoresearchActivation(ctx, workDir, true);
   await setAutoresearchMode(ctx, true);
   runtime.autoResumeTurns = 0;
