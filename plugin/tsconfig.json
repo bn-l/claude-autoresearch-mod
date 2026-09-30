@@ -1,0 +1,14 @@
+{
+  // The engine writes .claude-plugin/types/tsconfig.json beside a mod it loads.
+  // On top of it: `.ts` import suffixes (the runtime and Node both want them),
+  // es2024 for pi's `v`-flag regexes, and no noUncheckedIndexedAccess, which
+  // upstream's verbatim code was not written for.
+  "extends": "./.claude-plugin/types/tsconfig.json",
+  "compilerOptions": {
+    "target": "es2024",
+    "lib": ["es2024"],
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "noUncheckedIndexedAccess": false
+  }
+}

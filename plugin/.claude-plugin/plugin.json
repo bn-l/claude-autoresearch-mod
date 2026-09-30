@@ -1,0 +1,29 @@
+{
+  "name": "autoresearch",
+  "version": "0.1.0",
+  "description": "Autonomous experiment loop for Claude Code: run, measure, keep or discard. A port of pi-autoresearch.",
+  "author": { "name": "bn-l" },
+  "license": "MIT",
+  "keywords": ["autoresearch", "experiment", "optimization", "benchmark", "mod"],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "autoApproveTools": {
+      "type": "boolean",
+      "title": "Auto-approve autoresearch tools",
+      "description": "Run init_experiment, run_experiment and log_experiment without a permission prompt while autoresearch mode is on. run_experiment runs arbitrary shell commands.",
+      "default": true
+    },
+    "compactAtPercent": {
+      "type": "number",
+      "title": "Compact at context percent",
+      "description": "Compact the conversation between iterations once the context window is at least this full (0 turns it off).",
+      "default": 70
+    },
+    "questionWaitMinutes": {
+      "type": "number",
+      "title": "Wait for a reply to a question (minutes)",
+      "description": "When a turn in the loop ends by asking you something, wait this many minutes for your reply before the loop carries on without it (0 carries on at once, as upstream).",
+      "default": 5
+    }
+  }
+}
