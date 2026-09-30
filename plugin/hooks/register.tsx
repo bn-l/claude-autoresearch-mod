@@ -345,7 +345,7 @@ export const register: Register = (on, options) => {
   // -------------------------------------------------------------------------
 
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'autoresearch', description: COMMAND_DESCRIPTION, argumentHint: '[off|clear|export|dashboard|<text>]', immediate: true })
+    await $.command.register({ name: 'autoresearch', description: COMMAND_DESCRIPTION, argumentHint: '[off|clear|web|export|dashboard|<text>]', immediate: true })
     await $.command.register({ name: 'autoresearch-dashboard', description: 'Fullscreen autoresearch dashboard', immediate: true })
     await $.command.register({ name: 'autoresearch-export', description: 'Open the autoresearch browser dashboard', immediate: true })
     await $.command.register({ name: 'autoresearch-off', description: 'Turn autoresearch mode off', immediate: true })

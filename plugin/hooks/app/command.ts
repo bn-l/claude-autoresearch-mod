@@ -111,7 +111,8 @@ export async function runAutoresearchCommand(ctx: Ctx, args: string): Promise<Co
     return {};
   }
 
-  if (command === "export") {
+  // `web` is this port's name for it (D13); `export` is upstream's.
+  if (command === "export" || command === "web") {
     await exportDashboard(ctx);
     return {};
   }

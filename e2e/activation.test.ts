@@ -187,7 +187,8 @@ describe("/autoresearch", () => {
   test("with no arguments it prints the help", async () => {
     const session = await open(await tempDir()).start();
     await session.command("");
-    assert.match(session.host.notices[0]!.text, /^Usage: \/autoresearch \[off\|clear\|export\|dashboard\|<text>\]/);
+    assert.match(session.host.notices[0]!.text, /^Usage: \/autoresearch \[off\|clear\|web\|export\|dashboard\|<text>\]/);
+    assert.match(session.host.notices[0]!.text, /^web \(or export\) opens a local live dashboard/m);
   });
 });
 

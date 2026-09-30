@@ -74,7 +74,7 @@ out of the way and refuse to run.
 | `/autoresearch <text>` | Enter autoresearch mode. If `.auto/prompt.md` exists, resumes the loop with `<text>` as context. Otherwise the `autoresearch-create` skill sets up a new session. |
 | `/autoresearch off` | Leave autoresearch mode. Aborts a running turn, stops auto-resume, keeps `.auto/log.jsonl`. |
 | `/autoresearch clear` | Delete `.auto/log.jsonl`, reset all state, and turn autoresearch mode off. |
-| `/autoresearch export` | Open a live dashboard in your browser. It updates as experiments are logged. |
+| `/autoresearch web` | Open a live dashboard in your browser. It updates as experiments are logged. `/autoresearch export`, pi's name for it, does the same. |
 | `/autoresearch dashboard` | Open the fullscreen dashboard in the terminal. |
 
 `/autoresearch-dashboard`, `/autoresearch-export` and `/autoresearch-off` do the same with
@@ -99,7 +99,7 @@ it to `~/.claude/keybindings.json`, for example:
 - **Confidence score**: after 3+ runs, how the best improvement compares to the session's
   noise floor (median absolute deviation). ≥ 2.0× is likely real, 1.0–2.0× marginal,
   < 1.0× within noise. Advisory only.
-- **Browser dashboard**: `/autoresearch export` serves upstream's page (chart, table,
+- **Browser dashboard**: `/autoresearch web` serves upstream's page (chart, table,
   share card) from a small local helper that exits with Claude Code.
 
 ### Skills

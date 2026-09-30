@@ -124,6 +124,14 @@ describe("/autoresearch export", () => {
     assert.equal((await http(port, `/notify?token=${token}`, "POST")).status, 204);
   });
 
+  test("/autoresearch web is the same command (D13)", async () => {
+    const { session, port } = await exported();
+    await session.command("web");
+    assert.equal(dashboardServerOf(session.ctx)?.port, port);
+    assert.equal(session.host.openedUrls.length, 2);
+    assert.equal((await http(port, "/")).status, 200);
+  });
+
   test("a second export reuses the helper", async () => {
     const { session, port } = await exported();
     await session.command("export");

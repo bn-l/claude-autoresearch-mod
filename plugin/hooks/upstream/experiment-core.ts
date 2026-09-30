@@ -531,21 +531,22 @@ export const IN_FLIGHT_RESUME_PREFIX =
   "Finish the in-flight iteration shown above first (log or revert it).";
 
 // ported from pi-autoresearch@939ede8 index.ts:1287-1303
+// Changed from upstream (D13): `web` is listed beside `export`, which it is an alias of.
 export const autoresearchHelp = () =>
   [
-    "Usage: /autoresearch [off|clear|export|dashboard|<text>]",
+    "Usage: /autoresearch [off|clear|web|export|dashboard|<text>]",
     "",
     "<text> enters autoresearch mode and starts or resumes the loop.",
     "off leaves autoresearch mode.",
     "clear deletes the session log (.auto/log.jsonl) and turns autoresearch mode off.",
-    "export opens a local live dashboard for the session log in your browser.",
+    "web (or export) opens a local live dashboard for the session log in your browser.",
     "dashboard opens the fullscreen dashboard overlay in the terminal.",
 
     "",
     "Examples:",
     "  /autoresearch optimize unit test runtime, monitor correctness",
     "  /autoresearch model training, run 5 minutes of train.py and note the loss ratio as optimization target",
-    "  /autoresearch export",
+    "  /autoresearch web",
     "  /autoresearch dashboard",
   ].join("\n");
 
