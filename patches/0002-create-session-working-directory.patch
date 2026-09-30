@@ -1,0 +1,15 @@
+--- a/autoresearch-create/SKILL.md	2026-09-30 09:48:22
++++ b/autoresearch-create/SKILL.md	2026-09-30 09:48:22
+@@ -99,10 +99,10 @@
+ 
+ ### `.auto/config.json` (optional)
+ 
+-JSON config file that lives in `.auto/` under the pi session's working directory (`ctx.cwd`). Supported fields:
++JSON config file that lives in `.auto/` under the Claude Code session's working directory. Supported fields:
+ 
+ - **`maxIterations`** (number) — maximum experiments before auto-stopping.
+-- **`workingDir`** (string) — override the directory for all autoresearch operations: file I/O (`.auto/log.jsonl`, `.auto/prompt.md`, `.auto/measure.sh`, `.auto/checks.sh`, `.auto/ideas.md`), command execution, and git operations. Supports absolute paths or relative paths (resolved against `ctx.cwd`). The config file itself always stays under `ctx.cwd`. Fails if the directory doesn't exist.
++- **`workingDir`** (string) — override the directory for all autoresearch operations: file I/O (`.auto/log.jsonl`, `.auto/prompt.md`, `.auto/measure.sh`, `.auto/checks.sh`, `.auto/ideas.md`), command execution, and git operations. Supports absolute paths or relative paths (resolved against the session's working directory). The config file itself always stays under the session's working directory. Fails if the directory doesn't exist.
+ 
+ ```json
+ {
