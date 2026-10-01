@@ -1,10 +1,6 @@
 # autoresearch for Claude Code
 
-*Try an idea, measure it, keep what works, discard what doesn't, repeat forever.*
-
-A Claude Code mod that runs autonomous optimization loops: try an idea, benchmark it, keep
-improvements, revert regressions, repeat. It is a port of
-[pi-autoresearch](https://github.com/davebcn87/pi-autoresearch) v1.8.1 (by Tobi Lutke and
+A Claude Code mod that runs autonomous optimization loops. It will try an idea, benchmark it, keep improvements, revert regressions and repeat this process in a structured way. It is a port of [pi-autoresearch](https://github.com/davebcn87/pi-autoresearch) v1.8.1 (by Tobi Lutke and
 David Cortés) from the [pi](https://pi.dev/) agent to Claude Code, keeping its prompts,
 tools, session files, log format, widget, dashboards, command, hooks and skills. Works for
 any optimization target: test speed, bundle size, model training, build times, Lighthouse
@@ -12,9 +8,7 @@ scores.
 
 Inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch).
 
-A session is portable: `.auto/log.jsonl` written by pi-autoresearch resumes here, and one
-written here resumes in pi. Everything that behaves differently from upstream is listed
-in [DEVIATIONS.md](DEVIATIONS.md).
+The session format is the same as pi-autoresearch (`.auto/log.jsonl`) and can be used interchangedly.
 
 ## Quick start
 
