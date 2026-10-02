@@ -5,7 +5,7 @@ Uses the new mods api to change claude code's UI for the same autoresearch exper
 A Claude Code mod that runs autonomous optimization loops. It will try an idea, benchmark it, keep improvements, revert regressions and repeat this process in a structured way.
 
 <p align="center">
-  <img src="assets/dark-cut.svg" alt="autoresearch making sort.js faster in Claude Code" width="100%">
+  <img src="assets/tsp-dark.svg" alt="autoresearch shortening travelling salesman tours in Claude Code" width="100%">
 </p>
 
 For more information see, [pi-autoresearch](https://github.com/davebcn87/pi-autoresearch), this is an almost 1:1 port of that (removing some small bugs).
