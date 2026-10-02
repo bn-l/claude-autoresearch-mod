@@ -1,0 +1,6 @@
+{
+  "name": "tsp-bench",
+  "private": true,
+  "type": "module",
+  "description": "A travelling salesman benchmark with room for many improvements, for demos of the autoresearch mod"
+}
