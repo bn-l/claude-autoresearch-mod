@@ -29,9 +29,9 @@ import {
   updateWidget,
 } from "./activation.ts";
 import { cancelPendingResume } from "./resume.ts";
-import { snapshotWorkTree } from "./snapshot.ts";
 import { exportDashboard, stopDashboardServer } from "./export.ts";
 import { fireHook } from "./iteration-hooks.ts";
+import { uncommittedChanges, uncommittedWarning } from "./uncommitted.ts";
 
 export interface CommandOutcome {
   /** Open the fullscreen dashboard pane (its preconditions held). */
@@ -102,12 +102,14 @@ export async function runAutoresearchCommand(ctx: Ctx, args: string): Promise<Co
   const trimmedArgs = (args ?? "").trim();
   const command = trimmedArgs.toLowerCase();
 
-  if (!trimmedArgs) {
+  // With a goal held back by the uncommitted-changes warning, a bare /autoresearch starts (I10).
+  if (!trimmedArgs && ctx.pendingStart === null) {
     host.notify(autoresearchHelp(), "info");
     return {};
   }
 
   if (command === "off") {
+    ctx.pendingStart = null;
     await turnAutoresearchOff(ctx);
     return {};
   }
@@ -123,6 +125,7 @@ export async function runAutoresearchCommand(ctx: Ctx, args: string): Promise<Co
   }
 
   if (command === "clear") {
+    ctx.pendingStart = null;
     const workDir = await resolveWorkDir(host, await host.sessionCwd());
     const jsonlPaths = sessionFileCandidates(workDir, "log");
     await recordAutoresearchActivation(ctx, workDir, false);
@@ -169,8 +172,18 @@ export async function runAutoresearchCommand(ctx: Ctx, args: string): Promise<Co
   }
 
   const workDir = await resolveWorkDir(host, await host.sessionCwd());
-  // Not in upstream (I10): the first iteration starts from the tree as it is now.
-  await snapshotWorkTree(ctx, workDir);
+  // Not in upstream (I10): over uncommitted changes, say what they are and what may happen
+  // to them, and start only when /autoresearch is run again.
+  if (ctx.pendingStart === null) {
+    const changes = await uncommittedChanges(host, workDir);
+    if (changes?.length) {
+      ctx.pendingStart = trimmedArgs;
+      host.notify(uncommittedWarning(changes, "command"), "warning");
+      return {};
+    }
+  }
+  const goal = trimmedArgs || ctx.pendingStart || "";
+  ctx.pendingStart = null;
   await recordAutoresearchActivation(ctx, workDir, true);
   await setAutoresearchMode(ctx, true);
   runtime.autoResumeTurns = 0;
@@ -180,8 +193,8 @@ export async function runAutoresearchCommand(ctx: Ctx, args: string): Promise<Co
   // setup guidelines. `/skill:<name>` is expanded to the full SKILL.md, and trailing
   // args are appended as the session goal. Hook output is not prepended to it.
   const kickoff = rulesLoaded
-    ? rulesKickoff(trimmedArgs)
-    : await skillKickoff(ctx, trimmedArgs);
+    ? rulesKickoff(goal)
+    : await skillKickoff(ctx, goal);
 
   host.notify(NOTICES.activated(rulesLoaded), "info");
 

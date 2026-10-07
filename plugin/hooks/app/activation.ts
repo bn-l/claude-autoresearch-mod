@@ -23,7 +23,7 @@ import { isAutoresearchRunEntry, parseJsonlEntry, reconstructJsonlState } from "
 import { TOOL_SCHEMAS } from "../upstream/schemas.ts";
 import { TOOLS } from "../upstream/experiment-core.ts";
 import type { LoopState } from "./host.ts";
-import { reloadSnapshot, snapshotWorkTree } from "./snapshot.ts";
+import { uncommittedChanges, uncommittedWarning } from "./uncommitted.ts";
 import {
   canonicalPath,
   publish,
@@ -185,16 +185,24 @@ export const reconstructState = async (ctx: Ctx): Promise<void> => {
   // A recorded `/autoresearch on|off` in this session wins; otherwise same-cwd
   // sessions default on and redirected workingDir sessions default off, so
   // unrelated chats launched from a shared cwd never activate it.
-  const activate = shouldAutoActivateAutoresearch(
-    await canonicalPath(ctx.host, cwd),
-    await canonicalPath(ctx.host, workDir),
-    hasPersistedLog,
-    await recordedActivationDecision(ctx, workDir),
-  );
-  // Not in upstream (I10): the next iteration starts from the tree as it is now.
-  ctx.snapshot = null;
-  if (activate) await snapshotWorkTree(ctx, workDir);
+  const recorded = await recordedActivationDecision(ctx, workDir);
+  // Not in upstream (I11): a session that turned the mode on here comes back on, even
+  // when the loop was stopped before it logged anything.
+  const activate =
+    (!hasPersistedLog && recorded === true) ||
+    shouldAutoActivateAutoresearch(
+      await canonicalPath(ctx.host, cwd),
+      await canonicalPath(ctx.host, workDir),
+      hasPersistedLog,
+      recorded,
+    );
+  ctx.pendingStart = null;
   await setAutoresearchMode(ctx, activate);
+  // Not in upstream (I10): say what is uncommitted and what may happen to it.
+  if (activate) {
+    const changes = await uncommittedChanges(ctx.host, workDir);
+    if (changes?.length) ctx.host.notify(uncommittedWarning(changes, "session"), "warning");
+  }
 
   updateWidget(ctx);
 };
@@ -227,8 +235,6 @@ export async function restoreAfterReload(ctx: Ctx, loop: LoopState): Promise<voi
     await registerTools(ctx).catch(() => undefined);
   }
   await setAutoresearchMode(ctx, loop.mode);
-  // I10: the iteration's snapshot, as this session last took it; without one, a new one.
-  if (loop.mode) ctx.snapshot = (await reloadSnapshot(ctx, workDir)) ?? (await snapshotWorkTree(ctx, workDir));
   if (runtime.pendingResumeMessage !== null && !ctx.turn.busy) reschedulePendingResume(ctx, loop.questionWait ?? null);
   updateWidget(ctx);
 }

@@ -2,8 +2,6 @@
 // git runs through host.run, which in the mod is $.process.run: repo hooks off (F11).
 // Hook output is returned as the result's `context` (F3), after then before. On the
 // limit, pi's ctx.abort() is a turn abort a moment later, once this result is recorded.
-// A keep commits and a discard reverts only what changed since the iteration's snapshot
-// (I10, snapshot.ts); upstream's commands are used where there is none (no git).
 
 import {
   GIT_TEXT,
@@ -31,12 +29,7 @@ import { resolveWorkDir, sessionFilesOf, type Ctx } from "../context.ts";
 import { recordAutoresearchActivation, setAutoresearchMode, updateWidget } from "../activation.ts";
 import { fireHook } from "../iteration-hooks.ts";
 import { broadcastDashboardUpdate } from "../export.ts";
-import { commitOwnChanges, revertOwnChanges, snapshotWorkTree } from "../snapshot.ts";
 import type { ToolAnswer } from "./answer.ts";
-
-/** I10: a file with earlier uncommitted edits the experiment's own hunks couldn't be split from. */
-const committedWholeText = (files: string[]): string =>
-  `\n⚠️ Git: ${files.join(", ")} already had uncommitted edits that overlap this experiment's, so the commit includes them`;
 
 export interface LogParams {
   commit: string;
@@ -127,26 +120,7 @@ export async function executeLog(ctx: Ctx, params: LogParams): Promise<ToolAnswe
   let text = logSummaryText(state, experiment, params, secondaryMetrics, mergedASI);
 
   // Auto-commit only on keep — discards/crashes get reverted anyway
-  if (params.status === "keep" && ctx.snapshot) {
-    // I10: only this experiment's changes and the session files.
-    try {
-      const commitMsg = keepCommitMessage(params.description, params.status, state.metricName, params.metric, secondaryMetrics);
-      const outcome = await commitOwnChanges(host, workDir, ctx.snapshot, commitMsg);
-      if (!outcome.committed) {
-        text += GIT_TEXT.nothingToCommit;
-      } else if (outcome.exitCode === 0) {
-        text += GIT_TEXT.committed(outcome.output.split("\n")[0] || "");
-        if (outcome.committedWhole.length > 0) text += committedWholeText(outcome.committedWhole);
-        const shaResult = await host.run(["git", "rev-parse", "--short=7", "HEAD"], { cwd: workDir, timeoutMs: 5000 }).catch(() => null);
-        const newSha = (shaResult?.stdout || "").trim();
-        if (newSha && newSha.length >= 7) experiment.commit = newSha;
-      } else {
-        text += GIT_TEXT.commitFailed(outcome.exitCode, outcome.output);
-      }
-    } catch (e) {
-      text += GIT_TEXT.commitError(e instanceof Error ? e.message : String(e));
-    }
-  } else if (params.status === "keep") {
+  if (params.status === "keep") {
     try {
       const commitMsg = keepCommitMessage(params.description, params.status, state.metricName, params.metric, secondaryMetrics);
 
@@ -202,9 +176,7 @@ export async function executeLog(ctx: Ctx, params: LogParams): Promise<ToolAnswe
 
   if (params.status !== "keep") {
     try {
-      // I10: only this experiment's changes; upstream's script outside a git repository.
-      if (ctx.snapshot) await revertOwnChanges(host, workDir, ctx.snapshot);
-      else await host.run(["bash", "-c", REVERT_SCRIPT], { cwd: workDir, timeoutMs: 10000 });
+      await host.run(["bash", "-c", REVERT_SCRIPT], { cwd: workDir, timeoutMs: 10000 });
       text += GIT_TEXT.reverted(params.status);
     } catch (e) {
       text += GIT_TEXT.revertFailed(e instanceof Error ? e.message : String(e));
@@ -249,9 +221,6 @@ export async function executeLog(ctx: Ctx, params: LogParams): Promise<ToolAnswe
     if (beforeSteer) context.push(beforeSteer);
     ctx.lastBeforeSteer = beforeSteer;
   }
-
-  // I10: the next iteration starts from the tree as the hooks left it.
-  await snapshotWorkTree(ctx, workDir);
 
   updateWidget(ctx);
 

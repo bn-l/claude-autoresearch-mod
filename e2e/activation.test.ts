@@ -6,7 +6,6 @@
 
 import assert from "node:assert/strict";
 import { existsSync, promises as fsp } from "node:fs";
-import { tmpdir } from "node:os";
 import * as nodePath from "node:path";
 import { after, describe, test } from "node:test";
 
@@ -193,34 +192,115 @@ describe("/autoresearch", () => {
   });
 });
 
-// Uncommitted work doesn't stop anything: keep and discard touch only what an experiment
-// changed (I10, covered in loop.test.ts).
-describe("uncommitted work (I10)", () => {
-  test("/autoresearch starts over uncommitted changes", async () => {
-    const cwd = await makeRepo({ "src.js": "one\n" }, { "src.js": "two\n", "notes.md": "wip\n" });
+// Upstream's keep and discard commit or undo whatever is uncommitted; the person is told
+// first, by file (I10). A session that had turned the mode on resumes on (I11).
+describe("uncommitted changes (I10) and a resumed session (I11)", () => {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 100));
+  const warnings = (session: Session) => session.host.notices.filter((notice) => notice.level === "warning").map((notice) => notice.text);
+
+  /** A repo with a.js and b.js committed, then a.js edited, b.js deleted, notes.md and scratch/ (2 files) new. */
+  async function dirty(): Promise<string> {
+    const cwd = await makeRepo({ "a.js": "one\n", "b.js": "two\n" }, {
+      "a.js": "one, edited\n",
+      "notes.md": "mine\n",
+      "scratch/x.txt": "x\n",
+      "scratch/y.txt": "y\n",
+      ".auto/prompt.md": "# goal\n",
+    });
+    dirs.push(cwd);
+    await fsp.rm(nodePath.join(cwd, "b.js"));
+    return cwd;
+  }
+
+  test("/autoresearch over uncommitted changes lists them and doesn't start", async () => {
+    const session = await open(await dirty()).start();
+    await session.command("optimize runtime");
+    await settle();
+
+    assert.equal(session.app.isModeOn(), false);
+    assert.deepEqual(session.host.submitted, []);
+    assert.deepEqual(warnings(session), [
+      [
+        "⚠ 4 uncommitted changes:",
+        "  Edited:   a.js",
+        "  New:      notes.md, scratch/ (2 files)",
+        "  Deleted:  b.js",
+        "",
+        "Autoresearch commits and reverts with git, so these may end up in its commits or be permanently undone.",
+        "",
+        "Commit or stash them first (git stash -u), or run /autoresearch again to start anyway.",
+      ].join("\n"),
+    ]);
+  });
+
+  test("running /autoresearch again starts with the goal given first", async () => {
+    const session = await open(await dirty()).start();
+    await session.command("optimize runtime");
+    await session.command("");
+
+    assert.equal(session.app.isModeOn(), true);
+    await session.host.waitFor(() => session.host.submitted.length === 1, 2000, "the kickoff");
+    assert.match(session.host.submitted[0]!, /optimize runtime/);
+  });
+
+  test("a goal given the second time replaces the first", async () => {
+    const session = await open(await dirty()).start();
+    await session.command("optimize runtime");
+    await session.command("shrink the bundle");
+
+    await session.host.waitFor(() => session.host.submitted.length === 1, 2000, "the kickoff");
+    assert.match(session.host.submitted[0]!, /shrink the bundle/);
+    assert.doesNotMatch(session.host.submitted[0]!, /optimize runtime/);
+  });
+
+  test("off after the warning forgets the goal", async () => {
+    const session = await open(await dirty()).start();
+    await session.command("optimize runtime");
+    await session.command("off");
+    await session.command("");
+
+    assert.equal(session.app.isModeOn(), false);
+    assert.match(session.host.notices.at(-1)!.text, /^Usage: \/autoresearch/);
+  });
+
+  test("session files and ignored files don't count", async () => {
+    const cwd = await makeRepo({ ".gitignore": "out/\n" }, {
+      ".auto/prompt.md": "# goal\n",
+      "autoresearch.ideas.md": "- idea\n",
+      "out/build.log": "ignored\n",
+    });
     dirs.push(cwd);
     const session = await open(cwd).start();
     await session.command("optimize runtime");
 
     assert.equal(session.app.isModeOn(), true);
-    await session.host.waitFor(() => session.host.submitted.length === 1, 2000, "the kickoff");
+    assert.deepEqual(warnings(session), []);
   });
 
-  test("a same-cwd log turns the mode on over uncommitted changes", async () => {
+  test("long lists are cut short", async () => {
+    const files = Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`n${i}.txt`, "x\n"]));
+    const cwd = await makeRepo({}, files);
+    dirs.push(cwd);
+    const session = await open(cwd).start();
+    await session.command("optimize runtime");
+    assert.match(warnings(session)[0]!, /^  New: {6}n0\.txt, n1\.txt, n2\.txt, n3\.txt, n4\.txt and 3 more$/m);
+  });
+
+  test("a same-cwd log turns the mode on and warns, without asking", async () => {
     const cwd = await sameCwd();
-    await writeFiles(cwd, { "notes.md": "wip\n" });
+    await writeFiles(cwd, { "notes.md": "mine\n" });
     const session = await open(cwd).start();
+
     assert.equal(session.app.isModeOn(), true);
+    assert.match(warnings(session)[0]!, /^⚠ 1 uncommitted change:$/m);
+    assert.match(warnings(session)[0]!, /^Commit or stash them before continuing \(git stash -u\)\.$/m);
   });
 
-  test("outside a git repository it starts as before", async () => {
-    const cwd = await fsp.realpath(await fsp.mkdtemp(nodePath.join(tmpdir(), "ar-e2e-")));
-    dirs.push(cwd);
-    const session = await open(cwd).start();
-    await session.command("optimize runtime");
-
+  test("a session that turned the mode on resumes on, before any run was logged (I11)", async () => {
+    const cwd = await tempDir();
+    const session = await open(cwd, { store: recorded(`test:${cwd}`, cwd, true) }).start();
     assert.equal(session.app.isModeOn(), true);
-    await session.host.waitFor(() => session.host.submitted.length === 1, 2000, "the kickoff");
+    assert.deepEqual(session.host.registered.map((tool) => tool.name).sort(), TOOLS);
   });
 });
 

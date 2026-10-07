@@ -14,7 +14,6 @@ import {
   makeRepo,
   processesWith,
   removeTempDir,
-  sh,
   sleep,
   writeFiles,
   type FileSpec,
@@ -127,123 +126,6 @@ describe("keep and discard", () => {
     const logged = await session.use("log_experiment", { commit: "0000000", metric: 100, status: "keep", description: "baseline" });
     assert.match(logged.result, /📝 Git: committed/);
     assert.equal(await git(dir, "log", "-1", "--format=%s"), "baseline");
-  });
-});
-
-// pi's keep runs `git add -A` and its discard `git checkout -- .` and `git clean -fd`,
-// which would commit or erase the person's uncommitted work. Here both touch only what
-// changed since the iteration started (I10).
-describe("the person's uncommitted work (I10)", () => {
-  const LINES = Array.from({ length: 10 }, (_, i) => `${i + 1}\n`).join("");
-  /** `text` with line `line` (from 1) replaced by `to`. */
-  const edit = (line: number, to: string, text = LINES) => text.split("\n").map((l, i) => (i === line - 1 ? to : l)).join("\n");
-
-  /** A session over a tree with work in progress: `work` written, `deleted` removed, `staged` added. */
-  async function loopOver(work: Record<string, FileSpec>, { deleted = [], staged = [] }: { deleted?: string[]; staged?: string[] } = {}) {
-    const dir = await makeRepo({ "speed.txt": "100\n", "sort.js": "// v1\n", "a.txt": LINES, "gone.txt": "tracked\n" }, {
-      ".auto/prompt.md": "# Make the sort fast\n",
-      ".auto/measure.sh": { text: MEASURE, mode: 0o755 },
-      ...work,
-    });
-    dirs.push(dir);
-    for (const file of deleted) await fsp.rm(nodePath.join(dir, file));
-    if (staged.length > 0) await git(dir, "add", "--", ...staged);
-    const session = new Session(dir, { timeScale: 0.05 });
-    sessions.push(session);
-    await session.start();
-    await session.command("make the sort fast");
-    await session.use("init_experiment", { name: "sort speed", metric_name: "total_ms", metric_unit: "ms", direction: "lower" });
-    return { dir, session };
-  }
-
-  /** `git status` outside the session files, which the log appends to after a keep. */
-  const status = async (dir: string) =>
-    (await sh(dir, ["git", "status", "--porcelain", "--untracked-files=all"])).stdout
-      .split("\n")
-      .filter((line) => line && !line.includes(".auto/"))
-      .sort();
-  const committedFiles = async (dir: string) => (await git(dir, "show", "--name-only", "--format=", "HEAD")).split("\n").filter(Boolean).sort();
-
-  test("a discard undoes the experiment and leaves earlier work alone", async () => {
-    const { dir, session } = await loopOver(
-      { "a.txt": edit(1, "1 wip"), "notes.md": "mine\n", "scratch/x.txt": "mine\n" },
-      { deleted: ["gone.txt"] },
-    );
-    const before = await status(dir);
-
-    await writeFiles(dir, { "speed.txt": "120\n", "sort.js": "// v2\n", "new.txt": "exp\n", "newdir/deep/y.txt": "exp\n" });
-    await fsp.rm(nodePath.join(dir, "README.md"));
-    await session.use("run_experiment", MEASURE_CMD);
-    const logged = await session.use("log_experiment", { commit: "0000000", metric: 120, status: "discard", description: "slower" });
-    assert.match(logged.result, /📝 Git: reverted changes \(discard\) — autoresearch files preserved/);
-
-    assert.equal(await read(dir, "sort.js"), "// v1\n");
-    assert.equal(await read(dir, "speed.txt"), "100\n");
-    assert.equal(await read(dir, "README.md"), "fixture\n");
-    assert.equal(await exists(dir, "new.txt"), false);
-    assert.equal(await exists(dir, "newdir"), false);
-    assert.equal(await read(dir, "a.txt"), edit(1, "1 wip"));
-    assert.equal(await read(dir, "notes.md"), "mine\n");
-    assert.equal(await read(dir, "scratch/x.txt"), "mine\n");
-    assert.equal(await exists(dir, "gone.txt"), false);
-    assert.deepEqual(await status(dir), before);
-  });
-
-  test("a discard puts a file with earlier edits back as the person left it", async () => {
-    const { dir, session } = await loopOver({ "a.txt": edit(1, "1 wip") });
-    await writeFiles(dir, { "a.txt": edit(10, "10 exp", edit(1, "1 wip")) });
-    await session.use("run_experiment", MEASURE_CMD);
-    await session.use("log_experiment", { commit: "0000000", metric: 120, status: "discard", description: "slower" });
-    assert.equal(await read(dir, "a.txt"), edit(1, "1 wip"));
-  });
-
-  test("a keep commits the experiment and the session files, nothing else", async () => {
-    const { dir, session } = await loopOver({ "notes.md": "mine\n", "b.txt": "staged by the person\n" }, { staged: ["b.txt"] });
-    await writeFiles(dir, { "speed.txt": "80\n", "sort.js": "// v2\n", "new.txt": "exp\n" });
-    await session.use("run_experiment", MEASURE_CMD);
-    const logged = await session.use("log_experiment", { commit: "0000000", metric: 80, status: "keep", description: "faster" });
-    assert.match(logged.result, /📝 Git: committed/);
-    assert.doesNotMatch(logged.result, /⚠️/);
-
-    assert.deepEqual(await committedFiles(dir), [".auto/log.jsonl", ".auto/measure.sh", ".auto/prompt.md", "new.txt", "sort.js", "speed.txt"]);
-    assert.deepEqual(await status(dir), ["?? notes.md", "A  b.txt"]);
-    assert.equal(await git(dir, "log", "-1", "--format=%s"), "faster");
-  });
-
-  test("a keep in a file with earlier edits commits only the experiment's lines", async () => {
-    const { dir, session } = await loopOver({ "a.txt": edit(1, "1 wip") });
-    await writeFiles(dir, { "a.txt": edit(10, "10 exp", edit(1, "1 wip")) });
-    await session.use("run_experiment", MEASURE_CMD);
-    const logged = await session.use("log_experiment", { commit: "0000000", metric: 80, status: "keep", description: "faster" });
-    assert.doesNotMatch(logged.result, /⚠️/);
-
-    assert.equal(await git(dir, "show", "HEAD:a.txt"), edit(10, "10 exp").trimEnd());
-    assert.equal(await read(dir, "a.txt"), edit(10, "10 exp", edit(1, "1 wip")));
-    assert.deepEqual(await status(dir), [" M a.txt"]);
-  });
-
-  test("edits that overlap the person's are committed whole, and the result says so", async () => {
-    const { dir, session } = await loopOver({ "a.txt": edit(1, "1 wip") });
-    await writeFiles(dir, { "a.txt": edit(1, "1 exp") });
-    await session.use("run_experiment", MEASURE_CMD);
-    const logged = await session.use("log_experiment", { commit: "0000000", metric: 80, status: "keep", description: "faster" });
-    assert.match(logged.result, /⚠️ Git: a\.txt already had uncommitted edits that overlap this experiment's, so the commit includes them/);
-    assert.equal(await git(dir, "show", "HEAD:a.txt"), edit(1, "1 exp").trimEnd());
-  });
-
-  test("a hot reload in the middle of an iteration keeps its starting point", async () => {
-    const { dir, session } = await loopOver({ "a.txt": edit(1, "1 wip") });
-    await writeFiles(dir, { "sort.js": "// v2\n" });
-    const { loop, store } = session.host;
-    session.host.dispose();
-
-    const reloaded = new Session(dir, { timeScale: 0.05, loop, store });
-    sessions.push(reloaded);
-    await reloaded.start();
-    await reloaded.use("run_experiment", MEASURE_CMD);
-    await reloaded.use("log_experiment", { commit: "0000000", metric: 120, status: "discard", description: "slower" });
-    assert.equal(await read(dir, "sort.js"), "// v1\n");
-    assert.equal(await read(dir, "a.txt"), edit(1, "1 wip"));
   });
 });
 

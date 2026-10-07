@@ -657,9 +657,7 @@ export const LOG_TOOL: ToolText = {
     "Log experiment result (commit, metric, status, description)",
   promptGuidelines: [
     "Always call log_experiment after run_experiment to record the result.",
-    // Changed from upstream (I10): "runs git add -A && git commit on 'keep', and auto-reverts
-    // code changes on" is now what log_experiment does here.
-    "log_experiment automatically commits this experiment's changes on 'keep', and reverts them on 'discard'/'crash'/'checks_failed' (autoresearch files are preserved, and uncommitted work from before the experiment is left alone). Do NOT commit or revert manually.",
+    "log_experiment automatically runs git add -A && git commit on 'keep', and auto-reverts code changes on 'discard'/'crash'/'checks_failed' (autoresearch files are preserved). Do NOT commit or revert manually.",
     "Use status 'keep' if the PRIMARY metric improved. 'discard' if worse or unchanged. 'crash' if it failed. Secondary metrics are for monitoring — they almost never affect keep/discard. Only discard a primary improvement if a secondary metric degraded catastrophically, and explain why in the description.",
     "log_experiment reports a confidence score after 3+ runs (best improvement as a multiple of the noise floor). ≥2.0× = likely real, <1.0× = within noise. If confidence is below 1.0×, consider re-running the same experiment to confirm before keeping. The score is advisory — it never auto-discards.",
     "If you discover complex but promising optimizations you won't pursue immediately, append them as bullet points to .auto/ideas.md. Don't let good ideas get lost.",
