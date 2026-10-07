@@ -17,17 +17,29 @@ The session format is the same as pi-autoresearch (`.auto/log.jsonl`) and can be
 ## Quick start
 
 ```text
-claude plugin marketplace add bn-l/claude-autoresearch-mod
-claude plugin install autoresearch@bn-l
+claude plugin install autoresearch --marketplace bn-l/claude-autoresearch-mod
 ```
+
+To update: `claude plugin update autoresearch@bn-l`, or turn on auto-update for bn-l in `/plugin` → Marketplaces.
 
 To try it on a toy project first, copy [`examples/sort-bench`](examples/sort-bench) somewhere,
 make it a git repository, and run `/autoresearch make sort.js faster` in it.
 
 ## Requirements
 
-Claude Code **2.1.285** or newer.
-
-If using a version below **2.1.287** then set `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` set in `~/.claude/settings.json` (see [the docs](https://code.claude.com/docs/en/env-vars#in-settings-files) for more info).
+Claude Code **2.1.292** or newer.
 
 The browser dashboard (very optional) requires `node` (18 or newer) or `bun`.
+
+## Options
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `compactAtPercent` | 70 | Compacts between iterations once the context is this full (0 turns it off) |
+| `questionWaitMinutes` | 5 | When a turn ends by asking you something, waits this long for your reply before carrying on (0 doesn't wait) |
+
+`claude plugin configure autoresearch` shows them. To set one when installing, add `--config questionWaitMinutes=0` to the install command; to change one later:
+
+```text
+echo '{"questionWaitMinutes": "0"}' | claude plugin configure autoresearch --values-stdin
+```
