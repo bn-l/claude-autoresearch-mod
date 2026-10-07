@@ -26,6 +26,8 @@ make it a git repository, and run `/autoresearch make sort.js faster` in it.
 
 ## Requirements
 
-Requires Claude Code **2.1.285** or newer with `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` set in `~/.claude/settings.json` (see [the Claude Code docs](https://code.claude.com/docs/en/env-vars#in-settings-files) for more info).
+Claude Code **2.1.285** or newer.
+
+If using a version below **2.1.287** then set `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` set in `~/.claude/settings.json` (see [the docs](https://code.claude.com/docs/en/env-vars#in-settings-files) for more info).
 
 The browser dashboard (very optional) requires `node` (18 or newer) or `bun`.
