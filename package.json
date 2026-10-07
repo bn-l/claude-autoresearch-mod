@@ -7,9 +7,9 @@
     "test": "npm run test:unit && npm run test:e2e && npm run test:plugin",
     "test:unit": "node --test 'unit/*.test.mjs' 'unit/*.test.ts'",
     "test:e2e": "node --test --test-concurrency=4 'e2e/*.test.ts'",
-    "test:plugin": "cd plugin && CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude plugin test .",
+    "test:plugin": "cd plugin && claude plugin test .",
     "typecheck": "tsc -p plugin && tsc -p .",
-    "validate": "cd plugin && CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude plugin validate . --strict",
+    "validate": "cd plugin && claude plugin validate . --strict",
     "gen:schemas": "node scripts/gen-schemas.mjs"
   },
   "devDependencies": {

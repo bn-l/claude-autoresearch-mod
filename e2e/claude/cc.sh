@@ -47,7 +47,6 @@ case "${1:-}" in
           -u CLAUDE_CODE_SESSION_ATTENDED -u CLAUDE_PID -u CLAUDE_CODE_MESSAGING_SOCKET \
           -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_EXECPATH -u CLAUDE_EFFORT \
           -u CLAUDE_CODE_AUTO_COMPACT_WINDOW \
-          CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 \
           claude --plugin-dir $(printf '%q' "${AR_E2E_PLUGIN_DIR:-$root/plugin}")$args; sleep 600"
     # A folder Claude Code has not seen opens on the trust prompt, "No, exit" preselected.
     for _ in $(seq 1 30); do
