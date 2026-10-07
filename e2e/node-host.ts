@@ -21,6 +21,7 @@ import type {
   LoopState,
   NoticeLevel,
   ProcessResult,
+  RateLimit,
   SpawnChunk,
   SpawnEnd,
   Spawned,
@@ -39,7 +40,7 @@ import {
 
 export const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 export const PLUGIN_ROOT = nodePath.join(REPO_ROOT, "plugin");
-/** Claude Code refuses a `$.state` value over this many characters of JSON (2.1.285). */
+/** Claude Code refuses a `$.state` value over this many characters of JSON (2.1.285, still on 2.1.292). */
 const STATE_LIMIT_CHARS = 4 * 1024 * 1024;
 
 /** What the engine does to every process it runs for a plugin: repo git hooks off (F11). */
@@ -56,6 +57,10 @@ export interface NodeHostOptions {
   store?: Map<string, unknown>;
   /** The state the engine keeps across a hot reload; share one to model a reload. */
   loop?: { value?: LoopState };
+  /** The usage-limit windows `$.session.usage()` reports. */
+  rateLimits?: RateLimit[];
+  /** Someone can be asked (a surface draws the session); `-p` by default. */
+  canAsk?: boolean;
 }
 
 export class NodeHost implements Host {
@@ -67,8 +72,17 @@ export class NodeHost implements Host {
   contextPercentValue: number | null;
   store: Map<string, unknown>;
   loop: { value?: LoopState };
+  rateLimitsValue: RateLimit[];
+  canAskValue: boolean;
 
   notices: { text: string; level: NoticeLevel }[] = [];
+  /** Lines written to the transcript. */
+  logs: string[] = [];
+  /** Every status line set, null for a removal; the last is what shows. */
+  statuses: (string | null)[] = [];
+  /** The questions asked, and the answers to give them in order (null: dismissed). */
+  questions: { question: string; options: readonly string[]; header?: string }[] = [];
+  answers: (string | null)[] = [];
   submitted: string[] = [];
   aborted: string[] = [];
   registered: ToolSpec[] = [];
@@ -98,6 +112,13 @@ export class NodeHost implements Host {
     this.contextPercentValue = options.contextPercent ?? null;
     this.store = options.store ?? new Map();
     this.loop = options.loop ?? {};
+    this.rateLimitsValue = options.rateLimits ?? [];
+    this.canAskValue = options.canAsk ?? false;
+  }
+
+  /** The status line showing now. */
+  get status(): string | null {
+    return this.statuses.at(-1) ?? null;
   }
 
   // -- test helpers -------------------------------------------------------------
@@ -156,6 +177,9 @@ export class NodeHost implements Host {
   }
   async contextPercent(): Promise<number | null> {
     return this.contextPercentValue;
+  }
+  async rateLimits(): Promise<RateLimit[]> {
+    return structuredClone(this.rateLimitsValue);
   }
   async compact(): Promise<void> {
     this.compactions++;
@@ -351,6 +375,22 @@ export class NodeHost implements Host {
     this.notices.push({ text, level });
     this.changed();
   }
+  log(text: string): void {
+    this.logs.push(text);
+    this.changed();
+  }
+  setStatus(text: string | null): void {
+    this.statuses.push(text);
+    this.changed();
+  }
+  async canAsk(): Promise<boolean> {
+    return this.canAskValue;
+  }
+  async ask(question: string, options: readonly string[], header?: string): Promise<string | null> {
+    this.questions.push({ question, options: [...options], ...(header ? { header } : {}) });
+    this.changed();
+    return this.answers.shift() ?? null;
+  }
   closeDashboard(): void {
     this.dashboardCloses++;
   }
@@ -366,7 +406,7 @@ export class NodeHost implements Host {
     this.registered.push(spec);
     return `mcp__autoresearch__${spec.name}`;
   }
-  invalidate(event: "tool.describe" | "prompt.section"): void {
+  invalidate(event: "tool.describe"): void {
     this.invalidated.push(event);
   }
 
@@ -437,7 +477,6 @@ export class Session {
   constructor(cwd: string, options: SessionOptions = {}) {
     this.host = new NodeHost({ ...options, cwd });
     this.app = createApp(this.host, {
-      autoApproveTools: options.autoApproveTools ?? true,
       compactAtPercent: options.compactAtPercent ?? 70,
       questionWaitMinutes: options.questionWaitMinutes ?? 5,
     });
@@ -456,8 +495,11 @@ export class Session {
     return this;
   }
 
-  /** A turn of the main loop: turn.start, the body, turn.complete. */
-  async turn<T>(body: (turnId: string) => Promise<T>, options: { aborted?: boolean; answer?: string } = {}): Promise<T> {
+  /** A turn of the main loop: turn.start, the body, turn.complete (`failed`: an API error ended it). */
+  async turn<T>(
+    body: (turnId: string) => Promise<T>,
+    options: { aborted?: boolean; answer?: string; failed?: boolean } = {},
+  ): Promise<T> {
     const turnId = `turn-${++this.turns}`;
     this.currentTurn = turnId;
     this.app.turnStart(turnId);
@@ -465,7 +507,7 @@ export class Session {
       return await body(turnId);
     } finally {
       this.currentTurn = null;
-      this.app.turnComplete(options.aborted ?? false, options.answer ?? "");
+      this.app.turnComplete(options.aborted ?? false, options.answer ?? "", options.failed ?? false);
     }
   }
 
@@ -473,9 +515,14 @@ export class Session {
     return `toolu_${String(++this.toolUses).padStart(4, "0")}`;
   }
 
-  /** The model calling one of our tools. */
-  call(name: ToolName, input: Record<string, unknown>, signal?: AbortSignal): Promise<ToolAnswer | { deny: string }> {
-    return this.app.callTool(name, input, this.nextToolUseId(), signal);
+  /** The model calling one of our tools; `agentId` makes it a subagent's call. */
+  call(
+    name: ToolName,
+    input: Record<string, unknown>,
+    signal?: AbortSignal,
+    agentId?: string,
+  ): Promise<ToolAnswer | { deny: string }> {
+    return this.app.callTool(name, input, this.nextToolUseId(), signal, agentId);
   }
 
   /** As `call`, failing the test on a refusal. */
@@ -490,8 +537,14 @@ export class Session {
     return this.app.command(args);
   }
 
-  end(): void {
-    this.app.sessionEnd();
+  /** session.end; `other` (the default) is how a crash or a restart ends it. */
+  async end(reason = "other"): Promise<void> {
+    await this.app.sessionEnd(reason);
+    this.host.dispose();
+  }
+
+  /** The process dies: no session.end, timers gone, the store as it was. */
+  crash(): void {
     this.host.dispose();
   }
 }

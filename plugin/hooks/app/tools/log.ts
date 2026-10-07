@@ -203,6 +203,8 @@ export async function executeLog(ctx: Ctx, params: LogParams): Promise<ToolAnswe
     text += limitReachedText(state.maxExperiments);
     await recordAutoresearchActivation(ctx, workDir, false);
     await setAutoresearchMode(ctx, false);
+    // I19: once this turn ends, changes stashed before the loop are offered back.
+    ctx.unstashOfferDue = true;
     const turnId = ctx.turn.turnId;
     if (turnId) {
       host.after(LIMIT_ABORT_DELAY_MS, () => {

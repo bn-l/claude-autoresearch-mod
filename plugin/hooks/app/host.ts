@@ -26,7 +26,7 @@ export type FileKind = "file" | "directory" | "other";
 export interface RunningView {
   startedAt: number;
   command: string;
-  /** The run_experiment call's tool_use_id: the engine's `isRunning` stays false for our rows. */
+  /** The run_experiment call's tool_use_id: the engine's `isRunning` stays false for our rows (E2). */
   toolUseId?: string;
 }
 
@@ -58,12 +58,46 @@ export interface LoopState {
   toolNames: Record<"init_experiment" | "run_experiment" | "log_experiment", string> | null;
   /** The pending resume waits for a reply to the model's question (I9). */
   questionWait: QuestionWait | null;
+  /** The pending resume waits for a usage limit to reset (I13). */
+  limitWait: LimitWait | null;
 }
 
 /** A resume held back for the person's reply: until when (ms since the epoch), and for how long. */
 export interface QuestionWait {
   until: number;
   minutes: number;
+}
+
+/** A resume held back until a usage limit resets: until when (ms since the epoch). */
+export interface LimitWait {
+  until: number;
+}
+
+/** One usage-limit window, as Claude Code reports it. */
+export interface RateLimit {
+  kind: string;
+  /** 0 to 100 (past 100 on an exceeded spend limit). */
+  percentUsed: number;
+  /** When the window resets, in ms since the epoch; null when not reported. */
+  resetsAt: number | null;
+}
+
+/**
+ * The running loop as kept in the store under the session id (I12), so that a process
+ * that dies mid-loop carries on when the session starts again: a resume waiting to be
+ * sent, or a loop turn in flight.
+ */
+export interface SavedResume {
+  /** What to send: the pending resume's text, or the restart text for a turn in flight. */
+  message: string;
+  /** When it is due, in ms since the epoch (for a turn in flight: when it was sent). */
+  dueAt: number;
+  /** The last time the loop was seen alive: saved, or one of our tools called. */
+  activeAt: number;
+  inFlight: boolean;
+  questionWait: QuestionWait | null;
+  limitWait: LimitWait | null;
+  autoResumeTurns: number;
 }
 
 export interface View {
@@ -94,6 +128,8 @@ export interface Host {
   parentPid(): Promise<string | undefined>;
   /** How full the context window is, 0-100, or null when unknown. */
   contextPercent(): Promise<number | null>;
+  /** The usage-limit windows; empty off a subscription or before the first reading. */
+  rateLimits(): Promise<RateLimit[]>;
   /**
    * Compacts the conversation between turns as the person's `/compact` does, which
    * raises our session.compact hook; resolves once it is done or was refused.
@@ -123,16 +159,28 @@ export interface Host {
 
   // -- the person ------------------------------------------------------------
   notify(text: string, level: NoticeLevel): void;
+  /** One line in the transcript, which stays (a toast fades); the model doesn't read it. */
+  log(text: string): void;
+  /** Pins one line under the prompt until replaced; null removes it. */
+  setStatus(text: string | null): void;
+  /** Whether anyone can be asked: false where nothing draws the session (`-p`, the SDK). */
+  canAsk(): Promise<boolean>;
+  /**
+   * Asks the person to pick one of `options` (2-4) in Claude Code's own question dialog,
+   * `header` its chip; the label picked, the text typed under its "Other", or null when
+   * they dismissed it or it failed.
+   */
+  ask(question: string, options: readonly string[], header?: string): Promise<string | null>;
   /** Closes the fullscreen dashboard if it is open. */
   closeDashboard(): void;
 
   // -- the model -------------------------------------------------------------
-  /** Queues a prompt that starts a turn of its own once the session is idle. */
+  /** Queues a prompt that starts a turn of its own once the session is idle, read as the person's. */
   submit(text: string): void;
   abortTurn(turnId: string): Promise<void>;
   registerTool(spec: ToolSpec): Promise<string>;
-  /** Drops the cached tool placements / system prompt section. */
-  invalidate(event: "tool.describe" | "prompt.section"): void;
+  /** Drops the cached tool placements. */
+  invalidate(event: "tool.describe"): void;
 
   // -- state -----------------------------------------------------------------
   publish(view: Partial<View>): void;

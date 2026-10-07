@@ -28,10 +28,20 @@ import {
   setAutoresearchMode,
   updateWidget,
 } from "./activation.ts";
-import { cancelPendingResume } from "./resume.ts";
+import { cancelPendingResume, saveLoopInFlight } from "./resume.ts";
+import { offerUnstash, rememberStash, remindStash } from "./stash.ts";
 import { exportDashboard, stopDashboardServer } from "./export.ts";
 import { fireHook } from "./iteration-hooks.ts";
-import { uncommittedChanges, uncommittedWarning } from "./uncommitted.ts";
+import {
+  UNCOMMITTED_CHOICES,
+  UNCOMMITTED_HEADER,
+  UNCOMMITTED_START,
+  UNCOMMITTED_STASH,
+  stashChanges,
+  uncommittedChanges,
+  uncommittedQuestion,
+  uncommittedWarning,
+} from "./uncommitted.ts";
 
 export interface CommandOutcome {
   /** Open the fullscreen dashboard pane (its preconditions held). */
@@ -80,6 +90,8 @@ export async function turnAutoresearchOff(ctx: Ctx): Promise<void> {
   clearSessionUi(ctx);
   if (wasRunning && turnId) await ctx.host.abortTurn(turnId).catch(() => undefined);
   ctx.host.notify(NOTICES.off(wasRunning), "info");
+  // I19: the loop has stopped; changes stashed before it are offered back.
+  await offerUnstash(ctx);
 }
 
 async function skillKickoff(ctx: Ctx, trimmedArgs: string): Promise<string> {
@@ -89,6 +101,46 @@ async function skillKickoff(ctx: Ctx, trimmedArgs: string): Promise<string> {
   const skillMd = await ctx.host.readText(filePath);
   if (skillMd === null) return command;
   return expandSkillCommand(command, { name: "autoresearch-create", filePath, baseDir, skillMd });
+}
+
+/** `/autoresearch`'s arguments, as the prompt box offers them. */
+const ARGUMENTS: readonly (readonly [string, string])[] = [
+  ["off", "Turn autoresearch mode off"],
+  ["clear", "Delete the session log and turn the mode off"],
+  ["web", "Open the live dashboard in your browser"],
+  ["export", "Open the live dashboard in your browser (as web)"],
+  ["dashboard", "Open the fullscreen dashboard"],
+];
+
+/**
+ * The prompt box's rows for the word being typed (`token`) after `before`: the arguments
+ * it starts, once `before` is `/autoresearch `; none for anything else.
+ */
+export function argumentSuggestions(before: string, token: string): { text: string; description: string }[] {
+  if (!/^\s*\/autoresearch\s+$/.test(before)) return [];
+  const typed = token.toLowerCase();
+  return ARGUMENTS.filter(([name]) => name.startsWith(typed) && name !== typed).map(([text, description]) => ({ text, description }));
+}
+
+export const CLEAR_DELETE = "Delete it";
+export const CLEAR_KEEP = "Keep it";
+export const CLEAR_KEPT = "Nothing deleted; autoresearch mode is unchanged";
+export const NOT_STARTED = "Not started; the uncommitted changes are as they were";
+export const CLEAR_HEADER = "Clear log";
+
+/**
+ * I16: deleting the log can't be undone, so `clear` asks first where someone can answer.
+ * Where no one can (`-p`, the SDK) the command itself is the decision, as upstream.
+ */
+async function confirmClear(ctx: Ctx, workDir: string, logPaths: string[]): Promise<boolean> {
+  const host = ctx.host;
+  const existing: string[] = [];
+  for (const logPath of logPaths) if (await host.exists(logPath)) existing.push(path.relative(workDir, logPath) || path.basename(logPath));
+  if (existing.length === 0 || !(await host.canAsk())) return true;
+  const runs = ctx.runtime.state.results.length;
+  const what = `${existing.join(" and ")}${runs > 0 ? ` (${runs} run${runs === 1 ? "" : "s"})` : ""}`;
+  const answer = await host.ask(`This can't be undone. Delete ${what} and turn autoresearch mode off?`, [CLEAR_DELETE, CLEAR_KEEP], CLEAR_HEADER);
+  return answer === CLEAR_DELETE;
 }
 
 // Without `expandPromptTemplates` a `/skill:<name>` kickoff reaches the model as literal text.
@@ -128,6 +180,10 @@ export async function runAutoresearchCommand(ctx: Ctx, args: string): Promise<Co
     ctx.pendingStart = null;
     const workDir = await resolveWorkDir(host, await host.sessionCwd());
     const jsonlPaths = sessionFileCandidates(workDir, "log");
+    if (!(await confirmClear(ctx, workDir, Object.values(jsonlPaths)))) {
+      host.notify(CLEAR_KEPT, "info");
+      return {};
+    }
     await recordAutoresearchActivation(ctx, workDir, false);
     await setAutoresearchMode(ctx, false);
     runtime.autoResumeTurns = 0;
@@ -163,6 +219,7 @@ export async function runAutoresearchCommand(ctx: Ctx, args: string): Promise<Co
     } else {
       host.notify(NOTICES.noLogCleared, "info");
     }
+    await offerUnstash(ctx);
     return {};
   }
 
@@ -171,15 +228,37 @@ export async function runAutoresearchCommand(ctx: Ctx, args: string): Promise<Co
     return {};
   }
 
+  // I19: changes an earlier loop stashed are still there; say so before starting another.
+  await remindStash(ctx);
   const workDir = await resolveWorkDir(host, await host.sessionCwd());
   // Not in upstream (I10): over uncommitted changes, say what they are and what may happen
-  // to them, and start only when /autoresearch is run again.
+  // to them, and ask what to do: stash them and start, start anyway, or don't start. Where
+  // no one can be asked (`-p`, the SDK), list them and start only when run again.
   if (ctx.pendingStart === null) {
     const changes = await uncommittedChanges(host, workDir);
     if (changes?.length) {
-      ctx.pendingStart = trimmedArgs;
-      host.notify(uncommittedWarning(changes, "command"), "warning");
-      return {};
+      if (!(await host.canAsk())) {
+        ctx.pendingStart = trimmedArgs;
+        host.notify(uncommittedWarning(changes, "command"), "warning");
+        return {};
+      }
+      const choice = await host.ask(uncommittedQuestion(changes), UNCOMMITTED_CHOICES, UNCOMMITTED_HEADER);
+      if (choice === UNCOMMITTED_STASH) {
+        const stashed = await stashChanges(host, workDir);
+        if ("error" in stashed) {
+          host.notify(`Couldn't stash the uncommitted changes, so the loop didn't start: ${stashed.error}`, "error");
+          return {};
+        }
+        // I19: offered back when the loop stops.
+        await rememberStash(ctx, workDir, { ...stashed, changes: changes.length, stashedAt: Date.now() });
+        host.notify(
+          `Stashed ${changes.length} uncommitted change${changes.length === 1 ? "" : "s"}; you'll be asked about ${changes.length === 1 ? "it" : "them"} when the loop stops`,
+          "info",
+        );
+      } else if (choice !== UNCOMMITTED_START) {
+        host.notify(NOT_STARTED, "info");
+        return {};
+      }
     }
   }
   const goal = trimmedArgs || ctx.pendingStart || "";
@@ -211,5 +290,6 @@ export async function runAutoresearchCommand(ctx: Ctx, args: string): Promise<Co
   // must stay the create skill's own kickoff.
   const message = activationSteer && rulesLoaded ? `${activationSteer}\n\n${kickoff}` : kickoff;
   sendWhenReady(ctx, message);
+  saveLoopInFlight(ctx);
   return {};
 }

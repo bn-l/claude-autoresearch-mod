@@ -13,6 +13,7 @@ const SKILL = '---\nname: autoresearch-create\n---\nSET UP THE SESSION'
 const SESSION = { surface: 'terminal', isInteractive: true, cwd: '/work' } as const
 const TYPED = { origin: { kind: 'composer' as const }, presentation: { isFullscreen: false, columns: 120 } }
 const MESSAGES: SessionMessage[] = [{ role: 'user', text: 'hello', toolUses: [] }]
+const COMPOSE = { model: 'claude-opus-5-5', promptModel: 'claude-opus-5-5', surfaces: ['terminal'], tools: [], outputStyle: null, traits: [] } as const
 
 describe('mode gating', () => {
   test('our tools are refused while the mode is off, and never registered', async ($, on) => {
@@ -63,6 +64,15 @@ describe('/autoresearch', () => {
     expect(w.submitted[0]).not.toContain('<skill')
   })
 
+  test("the kickoff reaches the model as the person's own words, as upstream sends it (F4)", async ($, on) => {
+    const w = world(on, { files: { '/work/.auto/prompt.md': '# Goal' } })
+    await $.session.start(SESSION)
+
+    await $.command.run({ command: 'autoresearch', args: 'go', ...TYPED })
+    await w.clock.settle()
+    expect(w.submittedAsUser).toEqual([true])
+  })
+
   test('off turns the tools away again', async ($, on) => {
     const w = world(on, { files: { '/work/.auto/log.jsonl': logWithBaseline() } })
     await $.session.start(SESSION)
@@ -90,6 +100,22 @@ describe('/autoresearch', () => {
     expect(shown).toBe(
       "Autoresearch already active — use '/autoresearch off' to stop first · Autoresearch mode OFF · Autoresearch mode is not active",
     )
+  })
+})
+
+describe('the system prompt (F13)', () => {
+  test("the rules are the mod's own section, last, while the mode is on", async ($, on) => {
+    world(on, { files: { '/work/.auto/log.jsonl': logWithBaseline() } })
+    await $.session.start(SESSION)
+
+    const { sections } = await $.prompt.compose(COMPOSE)
+    expect(sections.map(section => section.id)).toEqual(['intro', 'autoresearch:rules'])
+    expect(sections[1]?.scope).toBe('session')
+    expect(sections[1]?.text).toStartWith('## Autoresearch Mode (ACTIVE)')
+    expect(sections[1]?.text).toContain('mcp__autoresearch__run_experiment')
+
+    await $.command.run({ command: 'autoresearch', args: 'off', ...TYPED })
+    expect((await $.prompt.compose(COMPOSE)).sections.map(section => section.id)).toEqual(['intro'])
   })
 })
 

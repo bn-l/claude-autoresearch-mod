@@ -59,6 +59,15 @@ export async function runHook(host: Host, payload: HookPayload): Promise<HookRes
   }
 }
 
+/**
+ * I18: a hook's output is text from outside (a web search, a file), so a tag that Claude
+ * Code uses to speak to the model is defused before the model reads it, as Claude Code
+ * does with its own hooks' output.
+ */
+export function escapeReminderTags(text: string): string {
+  return text.replace(/<(\/?)(system-reminder)\b/gi, "&lt;$1$2");
+}
+
 /** index.ts:1260-1264: run the hook, record it in the log, return its steer text. */
 export async function fireHook(host: Host, payload: HookPayload): Promise<string | null> {
   const result = await runHook(host, payload);
@@ -70,5 +79,6 @@ export async function fireHook(host: Host, payload: HookPayload): Promise<string
   } catch {
     // appendHookLogEntryIfConfigured swallows write failures
   }
-  return steerMessageFor(payload.event, result);
+  const steer = steerMessageFor(payload.event, result);
+  return steer === null ? null : escapeReminderTags(steer);
 }

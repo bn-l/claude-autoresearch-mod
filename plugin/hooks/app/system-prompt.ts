@@ -1,10 +1,11 @@
 // ported from pi-autoresearch@939ede8 index.ts:1522-1562 (before_agent_start): the
-// addendum is appended to a system prompt section while the mode is on. Claude Code
-// caches sections, so the text is recomputed as each prompt is submitted and the cache
-// dropped only when the text changed (a mode flip, checks.sh or ideas.md appearing or
-// going), which keeps the prompt cache warm as pi's static note did. The tools' snippets
-// and guidelines, which pi puts in its own tools and rules sections, follow the
-// addendum under the names the tools are served as (F1, F13).
+// addendum is this mod's own section of the system prompt while the mode is on (F13),
+// added last, after Claude Code's own. The text is recomputed as each prompt is
+// submitted, so each request reads it from memory, and it only changes with the session
+// (a mode flip, checks.sh or ideas.md appearing or going), which keeps the prompt cache
+// warm as pi's static note did. The tools' snippets and guidelines, which pi puts in its
+// own tools and rules sections, follow the addendum under the names the tools are served
+// as (F1).
 
 import { addendumText, toolSectionsText } from "../upstream/experiment-core.ts";
 import { resolveWorkDir, sessionFilesOf, type Ctx } from "./context.ts";
@@ -30,23 +31,18 @@ export async function computeAddendum(ctx: Ctx): Promise<string | null> {
   return text;
 }
 
-/** Recomputes the addendum; drops the cached section only when its text changed. */
+/** Recomputes the addendum (a failed lookup keeps the last one). */
 export async function refreshAddendum(ctx: Ctx): Promise<void> {
-  let next: string | null;
   try {
-    next = await computeAddendum(ctx);
+    ctx.addendum = await computeAddendum(ctx);
   } catch {
-    return;
+    // keep the last one
   }
-  if (next === ctx.addendum) return;
-  ctx.addendum = next;
-  ctx.host.invalidate("prompt.section");
 }
 
-/** The section's text with the addendum appended while the mode is on. */
-export async function sectionWithAddendum(ctx: Ctx, base: string | null): Promise<string | null> {
-  if (!ctx.runtime.autoresearchMode) return base;
+/** The mod's system prompt section while the mode is on; null while it is off. */
+export async function addendumSection(ctx: Ctx): Promise<string | null> {
+  if (!ctx.runtime.autoresearchMode) return null;
   if (ctx.addendum === null) ctx.addendum = await computeAddendum(ctx).catch(() => null);
-  if (ctx.addendum === null) return base;
-  return (base ?? "") + ctx.addendum;
+  return ctx.addendum?.trim() || null;
 }

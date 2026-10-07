@@ -14,7 +14,7 @@ import type {
   AutoresearchRunning,
   AutoresearchToolDetails,
 } from '../types/index.d.ts'
-import { createApp, toolNameOf, type App, type CompactMessage, type ToolName } from './app/index.ts'
+import { argumentSuggestions, createApp, toolNameOf, type App, type CompactMessage, type ToolName } from './app/index.ts'
 import type { Host, NoticeLevel, Spawned, SpawnEnd, ToolDetails, View } from './app/host.ts'
 import type { Options } from './app/context.ts'
 import { createExperimentState, dashboardHintVariants, clamp, type ExperimentState } from './upstream/experiment-core.ts'
@@ -29,7 +29,6 @@ import {
   renderRunResult,
 } from './upstream/tool-render.ts'
 import { markerTheme } from './ui/styled.ts'
-import { truncateToWidth } from './upstream/vendor/tui-width.ts'
 import { linesTree, outputText, textTree } from './ui/draw.tsx'
 import { PANE_ID, paneLayout, paneTree, scrolledOffset, type PaneActions } from './ui/pane.tsx'
 
@@ -57,6 +56,12 @@ const OUR_TOOLS = /^mcp__[\w-]*autoresearch[\w-]*__(?:init|run|log)_experiment$/
 
 const COMMAND_DESCRIPTION = 'Start, stop, clear, export, or open dashboards for autoresearch mode'
 
+/** The id of this mod's system prompt section (F13). */
+const PROMPT_SECTION_ID = 'autoresearch:rules'
+
+/** How long session.end waits for what must outlive the process to be written (I12). */
+const SESSION_END_WAIT_MS = 1000
+
 /** How many rows keep their drawing details, per tool (run rows carry output tails). */
 const DETAIL_ROWS_KEPT: Record<ToolName, number> = { init_experiment: 50, run_experiment: 60, log_experiment: 500 }
 
@@ -70,7 +75,6 @@ function optionsOf(options: PluginOptions): Options {
   const percent = Number(options.compactAtPercent ?? 70)
   const wait = Number(options.questionWaitMinutes ?? 5)
   return {
-    autoApproveTools: options.autoApproveTools !== false,
     compactAtPercent: Number.isFinite(percent) ? percent : 70,
     questionWaitMinutes: Number.isFinite(wait) && wait >= 0 ? wait : 5,
   }
@@ -96,6 +100,9 @@ const detailRows: Record<ToolName, string[]> = { init_experiment: [], run_experi
 
 // The pane's geometry as last drawn, for the key handlers' clamping.
 let paneGeometry: { maxScroll: number; viewportRows: number } = { maxScroll: 0, viewportRows: 1 }
+
+// The pane's spinner Client failed on this load; the pane draws the plain row instead.
+let spinnerFailed = false
 
 // Multi-line notices raised while one of our commands runs: its output row (F7).
 let commandOutput: string[] | null = null
@@ -127,7 +134,7 @@ function hostOf($: EngineInterface): Host {
       .then(() => refused.delete(key))
       .catch(error => {
         published.delete(key)
-        const message = `autoresearch: could not update the display (${key}): ${error instanceof Error ? error.message : String(error)}`
+        const message = `Could not update the display (${key}): ${error instanceof Error ? error.message : String(error)}`
         if (refused.has(key)) $.ui.log(message, { to: 'debug' })
         else $.ui.log(message)
         refused.add(key)
@@ -156,6 +163,12 @@ function hostOf($: EngineInterface): Host {
     tmpDir: async () => ((await $.env.get('TMPDIR')) ?? '/tmp').replace(/\/+$/, '') || '/tmp',
     parentPid: () => $.env.get('CLAUDE_PID'),
     contextPercent: async () => (await $.session.usage()).context.percent ?? null,
+    rateLimits: async () =>
+      (await $.session.usage()).rateLimits.map(limit => ({
+        kind: limit.kind,
+        percentUsed: limit.percentUsed,
+        resetsAt: (limit.resetsAt && Date.parse(limit.resetsAt)) || null,
+      })),
     // `/compact`, as the person runs it: the engine raises session.compact itself, so our
     // hook answers it (a plugin's own `$.session.compact()` skips that plugin's hook).
     compact: async () => {
@@ -239,13 +252,24 @@ function hostOf($: EngineInterface): Host {
       queuedNotices.push(line)
       noticeTimer ??= $.clock.after(Math.max(0, TOAST_GAP_MS - since) + 50, flushNotices)
     },
+    log: text => $.ui.log(text),
+    setStatus: text => $.ui.status(text ?? undefined),
+    canAsk: async () => (await $.session.surfaces()).length > 0,
+    ask: async (question, options, header) => {
+      try {
+        return await $.ui.ask(question, header ? { options: [...options], header } : [...options])
+      } catch {
+        return null
+      }
+    },
     closeDashboard: () => {
       void $.ui.close({ id: PANE_ID }).catch(() => undefined)
     },
 
+    // Read as the person's own words, as upstream's sendUserMessage (F4).
     submit: text => {
-      void $.prompt.submit({ text }).catch(error => {
-        $.ui.log(`autoresearch: could not send the prompt: ${error instanceof Error ? error.message : String(error)}`)
+      void $.prompt.submit({ text, asUser: true }).catch(error => {
+        $.ui.log(`Could not send the prompt: ${error instanceof Error ? error.message : String(error)}`)
       })
     },
     abortTurn: turnId => $.turn.abort({ turnId }),
@@ -299,16 +323,6 @@ function hostOf($: EngineInterface): Host {
   }
 }
 
-/** The band's line while a question waits for a reply (I9): when the loop carries on. */
-function questionWaitLine(until: number, width: number): string {
-  const at = new Date(until)
-  const time = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`
-  return truncateToWidth(
-    markerTheme.fg('warning', `  💬 The model asked you something. The loop carries on at ${time} unless you reply.`),
-    width,
-  )
-}
-
 function appOf($: EngineInterface): App {
   app ??= createApp(hostOf($), pluginOptions)
   return app
@@ -318,7 +332,7 @@ function appOf($: EngineInterface): App {
 async function ready($: EngineInterface): Promise<App> {
   const current = appOf($)
   started ??= current.sessionStart().catch(error => {
-    $.ui.log(`autoresearch: could not start: ${error instanceof Error ? error.message : String(error)}`)
+    $.ui.log(`Could not start: ${error instanceof Error ? error.message : String(error)}`)
   })
   await started
   return current
@@ -363,7 +377,14 @@ export const register: Register = (on, options) => {
   on('session.end', async ($, e, next) => {
     if (app) {
       if (e.reason === 'clear' || e.reason === 'resume') $.ui.close({ id: PANE_ID }).catch(() => undefined)
-      else app.sessionEnd()
+      else {
+        // What must outlive the process is written, within the session.end budget.
+        const ended = app.sessionEnd(e.reason).catch(() => undefined)
+        await new Promise<void>(resolve => {
+          const timer = $.clock.after(SESSION_END_WAIT_MS, resolve)
+          void ended.then(() => (timer.cancel(), resolve()))
+        })
+      }
     }
     return next(e)
   })
@@ -378,7 +399,7 @@ export const register: Register = (on, options) => {
   })
 
   on('turn.complete', async ($, e, next) => {
-    if (e.agentId === undefined) (await ready($)).turnComplete(e.isAborted, e.answer)
+    if (e.agentId === undefined) (await ready($)).turnComplete(e.isAborted, e.answer, e.reason === 'error')
     return next(e)
   })
 
@@ -390,15 +411,23 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  on('prompt.section', { name: 'env_info_simple' }, async ($, e, next) => {
-    const base = await next(e)
-    const current = await ready($)
-    if (!current.isModeOn()) return base
-    return { text: await current.sectionText(base.text) }
+  // The addendum as this mod's own section, last (F13).
+  on('prompt.compose', async ($, e, next) => {
+    const composed = await next(e)
+    const text = await (await ready($)).promptSection()
+    if (text === null) return composed
+    return { sections: [...composed.sections, { id: PROMPT_SECTION_ID, text, scope: 'session' as const }] }
+  })
+
+  // `/autoresearch ` offers its arguments.
+  on('prompt.autocomplete', async (_$, e, next) => {
+    const offered = await next(e)
+    const rows = argumentSuggestions(e.text.slice(0, e.start), e.token)
+    return rows.length > 0 ? { suggestions: [...offered.suggestions, ...rows] } : offered
   })
 
   // -------------------------------------------------------------------------
-  // The three tools (F1, F2, F10)
+  // The three tools (F1, F2, F10) and the agents beside the loop (I14)
   // -------------------------------------------------------------------------
 
   on('tool.describe', { tool: OUR_TOOLS }, async ($, e, next) => {
@@ -407,23 +436,21 @@ export const register: Register = (on, options) => {
     return { ...described, isDeferred: !current.isModeOn() }
   })
 
-  on('tool.check', { tool: OUR_TOOLS }, async ($, e, next) => {
-    const current = await ready($)
-    if (current.isModeOn() && current.ctx.options.autoApproveTools) return { decision: 'allow' }
-    return next(e)
-  })
-
   on('tool.call', { tool: OUR_TOOLS }, async ($, e, next) => {
     const current = await ready($)
     const name = toolNameOf(current.ctx, e.tool)
     if (!name) return next(e)
-    const { tool: _tool, tool_use_id: toolUseId, agentId: _agentId, ...input } = e as Record<string, unknown> & { tool: string; tool_use_id: string }
+    const { tool: _tool, tool_use_id: toolUseId, agentId, ...input } = e as Record<string, unknown> & {
+      tool: string
+      tool_use_id: string
+      agentId?: string
+    }
     let answer: Awaited<ReturnType<App['callTool']>>
     try {
-      answer = await current.callTool(name, input, toolUseId, next.signal)
+      answer = await current.callTool(name, input, toolUseId, next.signal, agentId)
     } catch (error) {
       // Esc: the engine has gone on without this call (the row reads Interrupted); what
-      // upstream threw ("aborted") would only show up as a hook failure.
+      // upstream threw ("aborted") would only show up as a hook failure (E3).
       if (next.signal.aborted) return { result: 'Interrupted' }
       throw error
     }
@@ -431,6 +458,24 @@ export const register: Register = (on, options) => {
     return answer.context && answer.context.length > 0
       ? { result: answer.result, context: answer.context }
       : { result: answer.result }
+  }).catch(async (_$, e, next) => {
+    // A failure the hook didn't answer: the model reads what went wrong, not a bare failure.
+    const name = baseToolName(e.tool) ?? e.tool
+    const why = next.error.kind === 'timeout' ? 'it timed out' : next.error.message
+    return { deny: `autoresearch: ${name} failed: ${why}. Check .auto/log.jsonl and git status before trying again.` }
+  })
+
+  // Agents the model starts (the Agent and Workflow tools); another mod's agents are its own.
+  on('agent.spawn', async ($, e, next) => {
+    if (next.origin.plugin !== 'engine') return next(e)
+    const decision = (await ready($)).spawnDecision({
+      background: e.background,
+      isWorkflow: e.workflow !== undefined,
+      isTeammate: e.isTeammate === true,
+    })
+    if (decision === null) return next(e)
+    if ('deny' in decision) return { deny: decision.deny }
+    return next({ ...e, background: false })
   })
 
   // -------------------------------------------------------------------------
@@ -491,9 +536,6 @@ export const register: Register = (on, options) => {
     } else {
       lines = widgetLines(state, width, markerTheme, dashboardHintVariants())
     }
-    // I9: under the title, while the loop waits for the person's reply.
-    const wait = (await $.state.get(LOOP)).value?.questionWait
-    if (wait) lines.splice(1, 0, questionWaitLine(wait.until, width))
     const { Box, Text } = $.ui.resolve(e)
     return linesTree({ Box, Text }, lines, width)
   })
@@ -573,12 +615,22 @@ export const register: Register = (on, options) => {
       },
     }
 
-    if (e.surface === 'terminal' || e.surface === 'desktop') {
+    if ((e.surface === 'terminal' || e.surface === 'desktop') && !spinnerFailed) {
       const { Box, Text, Button, Client } = $.ui.resolve(e)
       return paneTree({ Box, Text, Button, Client }, layout, actions)
     }
     const { Box, Text, Button } = $.ui.resolve(e)
     return paneTree({ Box, Text, Button }, layout, actions)
+  })
+
+  // The spinner's Client failed: the pane draws the plain spinner row from now on.
+  on('ui.fault', { requestId: PANE_ID }, async ($, e, next) => {
+    if (!spinnerFailed) {
+      spinnerFailed = true
+      $.ui.log(`The dashboard spinner failed (${e.phase}: ${e.reason}); drawing a plain row instead`, { to: 'debug' })
+      $.ui.invalidate('ui.render')
+    }
+    return next(e)
   })
 
   on('ui.scroll', { component: 'Pane', requestId: PANE_ID }, async ($, e) => {

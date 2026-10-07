@@ -32,7 +32,7 @@ import {
   sessionFilesOf,
   type Ctx,
 } from "./context.ts";
-import { cancelPendingResume, reschedulePendingResume } from "./resume.ts";
+import { cancelPendingResume, loadSavedResume, reschedulePendingResume } from "./resume.ts";
 import { refreshAddendum } from "./system-prompt.ts";
 
 const ACTIVATION_KEY_PREFIX = "activation:";
@@ -235,7 +235,10 @@ export async function restoreAfterReload(ctx: Ctx, loop: LoopState): Promise<voi
     await registerTools(ctx).catch(() => undefined);
   }
   await setAutoresearchMode(ctx, loop.mode);
-  if (runtime.pendingResumeMessage !== null && !ctx.turn.busy) reschedulePendingResume(ctx, loop.questionWait ?? null);
+  await loadSavedResume(ctx);
+  if (runtime.pendingResumeMessage !== null && !ctx.turn.busy) {
+    reschedulePendingResume(ctx, { questionWait: loop.questionWait ?? null, limitWait: loop.limitWait ?? null });
+  }
   updateWidget(ctx);
 }
 

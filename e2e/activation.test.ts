@@ -11,7 +11,15 @@ import { after, describe, test } from "node:test";
 
 import { renderLogResult } from "../plugin/hooks/upstream/tool-render.ts";
 import type { Theme } from "../plugin/hooks/upstream/dashboard-lines.ts";
-import { Session, makeRepo, removeTempDir, writeFiles, type SessionOptions } from "./node-host.ts";
+import { NOT_STARTED } from "../plugin/hooks/app/command.ts";
+import {
+  STASH_MESSAGE,
+  UNCOMMITTED_CANCEL,
+  UNCOMMITTED_HEADER,
+  UNCOMMITTED_START,
+  UNCOMMITTED_STASH,
+} from "../plugin/hooks/app/uncommitted.ts";
+import { Session, git, makeRepo, removeTempDir, writeFiles, type SessionOptions } from "./node-host.ts";
 
 const dirs: string[] = [];
 const sessions: Session[] = [];
@@ -115,7 +123,7 @@ describe("/autoresearch", () => {
     await session.command("optimize runtime");
 
     assert.equal(session.app.isModeOn(), true);
-    assert.deepEqual([...session.host.store.entries()], [
+    assert.deepEqual([...session.host.store.entries()].filter(([key]) => key.startsWith("activation:")), [
       [`activation:test:${cwd}:${workDir}`, { version: 1, workDir: await fsp.realpath(workDir), active: true }],
     ]);
     await session.host.waitFor(() => session.host.submitted.length === 1, 2000, "the kickoff");
@@ -284,6 +292,79 @@ describe("uncommitted changes (I10) and a resumed session (I11)", () => {
     const session = await open(cwd).start();
     await session.command("optimize runtime");
     assert.match(warnings(session)[0]!, /^  New: {6}n0\.txt, n1\.txt, n2\.txt, n3\.txt, n4\.txt and 3 more$/m);
+  });
+
+  // Where someone can answer (a surface draws the session), /autoresearch asks instead.
+  describe("asked in Claude Code's question dialog", () => {
+    async function asking(answer: string | null, cwd?: string) {
+      const dir = cwd ?? (await dirty());
+      const session = await open(dir, { canAsk: true }).start();
+      session.host.answers.push(answer);
+      await session.command("optimize runtime");
+      await settle();
+      return { cwd: dir, session };
+    }
+    const read = (cwd: string, file: string) => fsp.readFile(nodePath.join(cwd, file), "utf8").catch(() => null);
+
+    test("names the changes and offers to stash them, start anyway, or not start", async () => {
+      const { session } = await asking(UNCOMMITTED_CANCEL);
+      assert.deepEqual(session.host.questions, [
+        {
+          question:
+            "4 uncommitted changes (a.js, b.js, notes.md, scratch/ (2 files)) may end up in autoresearch's commits or be permanently undone. What should happen to them before the loop starts?",
+          options: [UNCOMMITTED_STASH, UNCOMMITTED_START, UNCOMMITTED_CANCEL],
+          header: UNCOMMITTED_HEADER,
+        },
+      ]);
+      assert.deepEqual(warnings(session), []);
+    });
+
+    test("stashing sets aside exactly what was listed, renames whole, and starts", async () => {
+      const cwd = await dirty();
+      await writeFiles(cwd, { "c.js": "three\n" });
+      await git(cwd, "add", "--", "c.js");
+      await git(cwd, "commit", "-q", "-m", "c");
+      await git(cwd, "mv", "c.js", "d.js");
+      const { session } = await asking(UNCOMMITTED_STASH, cwd);
+
+      assert.equal(session.app.isModeOn(), true);
+      await session.host.waitFor(() => session.host.submitted.length === 1, 2000, "the kickoff");
+      assert.equal(session.host.notices.at(-2)?.text, "Stashed 5 uncommitted changes; you'll be asked about them when the loop stops");
+      assert.equal(await git(cwd, "status", "--porcelain", "--untracked-files=all"), "?? .auto/prompt.md");
+      assert.match(await git(cwd, "stash", "list"), new RegExp(STASH_MESSAGE));
+      assert.equal(await read(cwd, ".auto/prompt.md"), "# goal\n");
+
+      await git(cwd, "stash", "pop", "-q");
+      assert.equal(await read(cwd, "a.js"), "one, edited\n");
+      assert.equal(await read(cwd, "b.js"), null);
+      assert.equal(await read(cwd, "d.js"), "three\n");
+      assert.equal(await read(cwd, "scratch/y.txt"), "y\n");
+    });
+
+    test("starting anyway leaves the changes as they are", async () => {
+      const { cwd, session } = await asking(UNCOMMITTED_START);
+      assert.equal(session.app.isModeOn(), true);
+      await session.host.waitFor(() => session.host.submitted.length === 1, 2000, "the kickoff");
+      assert.equal(await read(cwd, "a.js"), "one, edited\n");
+      assert.equal(await git(cwd, "stash", "list"), "");
+    });
+
+    for (const answer of [UNCOMMITTED_CANCEL, null, "wait, let me commit first"]) {
+      const what = answer === null ? "a dismissal" : `"${answer}"`;
+      test(`${what} doesn't start, and the next /autoresearch asks again`, async () => {
+        const { cwd, session } = await asking(answer);
+        assert.equal(session.app.isModeOn(), false);
+        assert.deepEqual(session.host.submitted, []);
+        assert.equal(session.host.notices.at(-1)?.text, NOT_STARTED);
+        assert.equal(await read(cwd, "a.js"), "one, edited\n");
+
+        session.host.answers.push(UNCOMMITTED_CANCEL);
+        await session.command("");
+        assert.match(session.host.notices.at(-1)!.text, /^Usage: \/autoresearch/);
+        await session.command("optimize runtime");
+        assert.equal(session.host.questions.length, 2);
+      });
+    }
   });
 
   test("a same-cwd log turns the mode on and warns, without asking", async () => {

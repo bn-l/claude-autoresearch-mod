@@ -55,9 +55,12 @@ export type AutoresearchLoop = {
   lastRunDuration: number | null
   toolNames: AutoresearchToolNames | null
   questionWait: AutoresearchQuestionWait | null
+  limitWait: AutoresearchLimitWait | null
 }
 
 export type AutoresearchQuestionWait = { until: number; minutes: number }
+
+export type AutoresearchLimitWait = { until: number }
 
 export type AutoresearchRunRow = {
   command: string

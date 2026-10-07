@@ -7,7 +7,7 @@ import { mock, type MockClock } from 'claude-code/testing'
 import type { On, RenderSurface, SessionMessage } from 'claude-code'
 
 export const PLUGIN = 'autoresearch'
-export const tool = (name: 'init_experiment' | 'run_experiment' | 'log_experiment') => `mcp__autoresearch__${name}`
+export const tool = (name: 'init_experiment' | 'run_experiment' | 'log_experiment') => `mcp__autoresearch__${name}` as const
 
 export interface WorldInit {
   cwd?: string
@@ -23,7 +23,11 @@ export interface World {
   clock: MockClock
   registered: string[]
   submitted: string[]
+  /** For each submitted prompt: whether the model reads it as the person's own words. */
+  submittedAsUser: boolean[]
   toasts: string[]
+  /** The status lines set, undefined for a removal. */
+  statuses: (string | undefined)[]
   logs: string[]
   invalidated: string[]
   opened: string[]
@@ -42,7 +46,9 @@ export function world(on: On, init: WorldInit = {}): World {
     clock: mock.clock(on, { now: 1_000_000 }),
     registered: [],
     submitted: [],
+    submittedAsUser: [],
     toasts: [],
+    statuses: [],
     logs: [],
     invalidated: [],
     opened: [],
@@ -130,8 +136,10 @@ export function world(on: On, init: WorldInit = {}): World {
   on('command.register', (_$, e) => ({ value: { command: e.name } }))
   on('prompt.submit', (_$, e) => {
     w.submitted.push(e.text)
+    w.submittedAsUser.push(e.origin.kind === 'plugin' && e.origin.asUser === true)
     return { text: e.text }
   })
+  on('prompt.compose', () => ({ sections: [{ id: 'intro', text: 'Claude Code', scope: 'shared' as const }] }))
   on('turn.abort', (_$, e) => {
     w.aborted.push(String((e as { turnId?: string }).turnId))
     return { value: undefined }
@@ -143,6 +151,10 @@ export function world(on: On, init: WorldInit = {}): World {
   })
   on('ui.log', (_$, e) => {
     w.logs.push(e.text)
+    return { value: undefined }
+  })
+  on('ui.status', (_$, e) => {
+    w.statuses.push(e.text)
     return { value: undefined }
   })
   on('ui.invalidate', (_$, e) => {

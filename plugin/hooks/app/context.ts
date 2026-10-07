@@ -13,11 +13,9 @@ import {
   type ExperimentState,
 } from "../upstream/experiment-core.ts";
 import type { HookStage } from "../upstream/hooks-core.ts";
-import type { Cancel, Host, LoopState, QuestionWait, View } from "./host.ts";
+import type { Cancel, Host, LimitWait, LoopState, QuestionWait, SavedResume, View } from "./host.ts";
 
 export interface Options {
-  /** userConfig `autoApproveTools`: allow our tools without a prompt while the mode is on. */
-  autoApproveTools: boolean;
   /** userConfig `compactAtPercent`: compact between iterations at this context fill (0: off). */
   compactAtPercent: number;
   /** userConfig `questionWaitMinutes`: how long a turn that asked the person waits for a reply (0: not at all). */
@@ -72,6 +70,26 @@ export interface Ctx {
    * until when, and how long the wait was. Cleared when a turn or a prompt comes first.
    */
   questionWait: QuestionWait | null;
+  /** The pending resume waits for a usage limit to reset (I13). Cleared as questionWait is. */
+  limitWait: LimitWait | null;
+  /** The person interrupted the loop (I1) and nothing has started it again yet. */
+  paused: boolean;
+  /** The status line as last set (I15), so an unchanged one is not set again. */
+  status: string | null;
+  /** This session's loop as last saved to the store (I12); null when none is. */
+  savedResume: SavedResume | null;
+  /** The store writes of the saved loop, in order. */
+  storeWrites: Promise<unknown>;
+  /** Subagents whose calls to our tools were refused, so the person is told once each (I14). */
+  refusedAgents: Set<string>;
+  /** I19: the offer to unstash while it is open, so a second stop doesn't open another. */
+  unstashOffer: Promise<void> | null;
+  /** I19: the loop hit its iteration cap in this turn; the offer comes once the turn ends. */
+  unstashOfferDue: boolean;
+  /** I19: where the stashed changes are was said since the loop last ran; not again until it runs. */
+  stashNoted: boolean;
+  /** I19: this session said at its start that changes from an earlier loop are stashed. */
+  stashReminded: boolean;
   /**
    * The goal of an `/autoresearch` held back by the warning about uncommitted changes
    * (I10): the next `/autoresearch` starts, with it unless it gives a goal of its own.
@@ -105,6 +123,16 @@ export function createCtx(host: Host, options: Options): Ctx {
     compactedSinceTurn: false,
     lastBeforeSteer: null,
     questionWait: null,
+    limitWait: null,
+    paused: false,
+    status: null,
+    savedResume: null,
+    storeWrites: Promise.resolve(),
+    refusedAgents: new Set(),
+    unstashOffer: null,
+    unstashOfferDue: false,
+    stashNoted: false,
+    stashReminded: false,
     pendingStart: null,
   };
 }
@@ -125,7 +153,27 @@ export function loopStateOf(ctx: Ctx): LoopState {
     lastRunDuration: runtime.lastRunDuration,
     toolNames: ctx.toolNames,
     questionWait: ctx.questionWait,
+    limitWait: ctx.limitWait,
   };
+}
+
+/** `HH:MM` in local time. */
+export function clockTime(ms: number): string {
+  const at = new Date(ms);
+  return `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
+}
+
+/** The status line under the prompt (I15): what the loop is waiting for, if anything. */
+export function statusLineOf(ctx: Ctx): string | null {
+  if (!ctx.runtime.autoresearchMode) return null;
+  if (ctx.questionWait) {
+    return `Waiting for your reply until ${clockTime(ctx.questionWait.until)}, then the loop carries on`;
+  }
+  if (ctx.limitWait) {
+    return `Usage limit reached; the loop carries on at ${clockTime(ctx.limitWait.until)}`;
+  }
+  if (ctx.paused) return "Paused. Send a message to carry on, or /autoresearch off to stop";
+  return null;
 }
 
 /**
@@ -171,6 +219,13 @@ export function publish(ctx: Ctx, parts: (keyof View)[] = ["mode", "experiment",
     if (part === "loop") view.loop = loopStateOf(ctx);
   }
   ctx.host.publish(view);
+  if (parts.includes("loop") || parts.includes("mode")) {
+    const status = statusLineOf(ctx);
+    if (status !== ctx.status) {
+      ctx.status = status;
+      ctx.host.setStatus(status);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
