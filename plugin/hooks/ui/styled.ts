@@ -4,6 +4,8 @@
 // measures and cuts the lines exactly as in pi; `styledLines` then parses those lines into
 // spans that Claude Code's Text draws in its theme's colours (the plan's mapping, §4.3).
 
+import type { ThemeKey } from "claude-code";
+
 import type { Theme, ThemeColor } from "../upstream/dashboard-lines.ts";
 
 const TOKENS: readonly ThemeColor[] = [
@@ -11,7 +13,7 @@ const TOKENS: readonly ThemeColor[] = [
 ];
 
 /** pi theme token → Claude Code theme key (undefined: the default colour). */
-export const THEME_KEY: Record<ThemeColor, string | undefined> = {
+export const THEME_KEY: Record<ThemeColor, ThemeKey | undefined> = {
   text: "text",
   accent: "claude",
   success: "success",
@@ -45,7 +47,7 @@ export const plainTheme: Theme = {
 export interface Span {
   text: string;
   /** A Claude Code theme key. */
-  color?: string;
+  color?: ThemeKey;
   bold?: boolean;
 }
 
